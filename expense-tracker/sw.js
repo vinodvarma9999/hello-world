@@ -1,5 +1,5 @@
 // Offline cache for Spendly. Bump VERSION when files change.
-const VERSION = 'spendly-v1';
+const VERSION = 'spendly-v2';
 const ASSETS = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.json',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 

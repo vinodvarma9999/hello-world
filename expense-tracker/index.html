@@ -77,11 +77,18 @@
       <!-- CATEGORIES / SETTINGS -->
       <section class="screen" id="screen-settings">
         <div class="card">
-          <h2>Monthly budget</h2>
+          <h2>Overall monthly budget</h2>
+          <p class="muted hint-top">Optional. If empty, the dashboard uses the total of your category budgets.</p>
           <div class="field-row">
             <input type="number" inputmode="decimal" min="0" step="any" id="budgetInput" placeholder="e.g. 20000">
             <button class="btn" id="saveBudget">Save</button>
           </div>
+        </div>
+        <div class="card">
+          <h2>Category budgets · <span id="catBudgetMonth"></span></h2>
+          <p class="muted hint-top">Applies to this month and every month after, until you change it. Use ‹ › at the top to set a different amount for another month.</p>
+          <ul class="cat-manage cat-budgets" id="catBudgetList"></ul>
+          <button class="btn" id="saveCatBudgets" style="width:100%">Save category budgets</button>
         </div>
         <div class="card">
           <h2>Currency</h2>
@@ -128,6 +135,7 @@
         <input type="number" inputmode="decimal" step="any" min="0.01" id="txAmount" placeholder="0" required>
       </label>
       <div class="cat-picker" id="catPicker"></div>
+      <div class="cat-hint" id="catHint" hidden></div>
       <div class="field-row">
         <input type="date" id="txDate" required aria-label="Date">
       </div>

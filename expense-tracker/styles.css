@@ -7,6 +7,7 @@
   --primary: #6366f1;
   --primary-2: #0ea5a4;
   --danger: #e11d48;
+  --warn: #d97706;
   --radius: 18px;
   --shadow: 0 1px 2px rgba(20, 20, 50, .05), 0 6px 20px rgba(20, 20, 50, .05);
   --safe-b: env(safe-area-inset-bottom, 0px);
@@ -165,3 +166,15 @@ input[type=color] { width: 44px; height: 44px; border: 0; padding: 0; background
 
 .toast { position: fixed; left: 50%; bottom: calc(150px + var(--safe-b)); transform: translateX(-50%) translateY(20px); background: #1e1f2e; color: #fff; padding: 10px 16px; border-radius: 12px; font-size: 14px; opacity: 0; pointer-events: none; transition: .25s; z-index: 30; }
 .toast.show { opacity: 1; transform: translateX(-50%); }
+
+/* Category budgets */
+.hint-top { margin: -6px 0 12px; }
+.cat-budgets input { width: 120px; flex: none; text-align: right; padding: 8px 10px; }
+.cb-sub { font-size: 11px; margin-top: 4px; color: var(--muted); }
+.cb-sub.ok { color: #16a34a; }
+.cb-sub.warn { color: var(--warn); }
+.cb-sub.over { color: var(--danger); font-weight: 600; }
+.cat-hint { font-size: 13px; padding: 8px 12px; border-radius: 10px; background: var(--bg); }
+.cat-hint[hidden] { display: none; }
+.cat-hint.warn { color: var(--warn); }
+.cat-hint.over { color: var(--danger); font-weight: 600; }

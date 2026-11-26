@@ -14,7 +14,8 @@ No sign-up, no server: your data stays on your device and it works offline.
 - **Dashboard**: total spent this month, a budget progress bar, today's total, daily average, a 7-day bar chart, a category donut chart with breakdown, and recent expenses.
 - **Transactions**: grouped by day with daily totals, search, and filter chips by category. Tap any expense to edit or delete it.
 - **Categories**: 8 built-in categories (Food, Groceries, Transport, Shopping, Bills, Health, Entertainment, Other). You can add your own with an emoji and colour, or delete them.
-- **Settings**: monthly budget, currency (₹, $, €, £ and more), CSV export, delete all data.
+- **Category budgets**: set a monthly limit for each category. A budget carries forward to the following months until you change it, so you can revise it month by month (use ‹ › to pick the month) without changing past months. The dashboard shows how much is left or over for each category (amber at 80%, red when over), the add-expense sheet shows what's left as you type, and you get a warning when an expense takes a category over its budget.
+- **Settings**: overall monthly budget (optional; otherwise the total of your category budgets is used), currency (₹, $, €, £ and more), CSV export, delete all data.
 - Browse previous months with the ‹ › arrows in the header.
 - Light and dark mode follow your phone's setting.
 
