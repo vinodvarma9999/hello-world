@@ -2,7 +2,7 @@
 
 /* ---------- Storage ---------- */
 const STORE_KEY = 'spendly.v1';
-const APP_VERSION = 7; // keep in step with VERSION in sw.js
+const APP_VERSION = 8; // keep in step with VERSION in sw.js
 
 const DEFAULT_CATEGORIES = [
   { id: 'food', name: 'Food', emoji: '🍔', color: '#f97316' },
@@ -111,7 +111,7 @@ function money(n, compact = false) {
   if (!fmtCache[key]) {
     fmtCache[key] = new Intl.NumberFormat(undefined, {
       style: 'currency', currency: state.currency,
-      maximumFractionDigits: compact ? 0 : 2, minimumFractionDigits: 0,
+      maximumFractionDigits: compact ? 1 : 2, minimumFractionDigits: 0,
       notation: compact ? 'compact' : 'standard',
     });
   }
@@ -302,7 +302,258 @@ function renderDashboard() {
   const recent = sortTx(list).slice(0, 5);
   $('#recentList').innerHTML = recent.length ? recent.map(txItem).join('')
     : '<li class="empty">Tap + to add your first expense</li>';
+
+  const st = budgetStatus();
+  $('#heroCard').classList.toggle('over', st.overallOver);
+  renderBudgetAlert(st);
+  renderTicker(st);
+  renderTrends();
+  renderPayees();
 }
+
+/* ---------- Budget alerts & scrolling messages ---------- */
+const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth() + n, 1);
+const sumOf = (l) => l.reduce((s, t) => s + t.amount, 0);
+const daysIn = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+// Expenses in a month, optionally only up to a day of the month (for "at this point last month").
+const txIn = (mk, uptoDay) => state.transactions.filter((t) => t.date.startsWith(mk) && (!uptoDay || +t.date.slice(8) <= uptoDay));
+const monthShort = (d) => d.toLocaleDateString(undefined, { month: 'short' });
+
+function budgetStatus() {
+  const mk = monthKey(viewMonth);
+  const total = sumOf(monthTx());
+  const overallBudget = state.budget > 0 ? state.budget : catBudgetTotal(mk);
+  const cats = state.categories.map((c) => ({ c, budget: catBudget(c.id, mk), spent: spentIn(c.id, mk) })).filter((x) => x.budget > 0);
+  return {
+    mk, total, overallBudget,
+    current: mk === monthKey(new Date()),
+    overallOver: overallBudget > 0 && total > overallBudget,
+    over: cats.filter((x) => x.spent > x.budget).sort((a, b) => (b.spent - b.budget) - (a.spent - a.budget)),
+    near: cats.filter((x) => x.spent <= x.budget && x.spent >= x.budget * 0.8).sort((a, b) => (a.budget - a.spent) - (b.budget - b.spent)),
+    any: overallBudget > 0,
+  };
+}
+
+function renderBudgetAlert(st) {
+  const el = $('#budgetAlert');
+  const overs = [];
+  if (st.overallOver && state.budget > 0) overs.push(`Monthly budget by ${money(st.total - st.overallBudget)}`);
+  st.over.forEach((x) => overs.push(`${x.c.name} by ${money(x.spent - x.budget)}`));
+  let html = '', level = 'ok';
+  if (overs.length) {
+    html += `<div class="ab-line over">⚠️ ${st.current ? 'Over budget' : 'Was over budget'}: ${esc(overs.join(' · '))}</div>`;
+    level = 'over';
+  }
+  if (st.current && st.near.length) {
+    html += `<div class="ab-line warn">${esc(st.near.map((x) => `${x.c.name}: only ${money(x.budget - x.spent)} left`).join(' · '))}</div>`;
+    if (level === 'ok') level = 'warn';
+  }
+  if (!html && st.current && st.any) html = '<div class="ab-line ok">✅ All budgets on track</div>';
+  el.hidden = !html;
+  el.className = 'alert-banner ' + level;
+  el.innerHTML = html;
+}
+
+function topPayees(list) {
+  const map = {};
+  for (const t of list) {
+    const name = (t.note || '').trim();
+    if (!name) continue;
+    const k = name.toLowerCase();
+    const p = map[k] || (map[k] = { name, count: 0, total: 0, cats: {}, last: '' });
+    p.count++; p.total += t.amount; p.cats[t.category] = (p.cats[t.category] || 0) + 1;
+    if (t.date >= p.last) { p.last = t.date; p.name = name; }
+  }
+  return Object.values(map).map((p) => ({ ...p, cat: Object.entries(p.cats).sort((a, b) => b[1] - a[1])[0][0] }))
+    .sort((a, b) => b.total - a.total);
+}
+
+function tickerMessages(st) {
+  const msgs = [];
+  const now = new Date();
+  const list = monthTx();
+  st.over.forEach((x) => msgs.push({ level: 'over', go: 'budgets', text: `⚠️ ${x.c.emoji} ${x.c.name}: ${money(x.spent - x.budget)} over budget` }));
+  if (st.current) st.near.forEach((x) => msgs.push({ level: 'warn', go: 'budgets', text: `${x.c.emoji} ${x.c.name}: ${Math.round((x.spent / x.budget) * 100)}% of budget used` }));
+  // Compared with last month (up to the same day when this is the current month).
+  const prevMk = monthKey(addMonths(viewMonth, -1));
+  const day = st.current ? now.getDate() : 0;
+  const prevList = txIn(prevMk, day);
+  const prevTotal = sumOf(prevList);
+  const when = st.current ? ' at this point' : '';
+  if (prevTotal > 0 && st.total > 0 && Math.abs(st.total - prevTotal) >= 1) {
+    const diff = st.total - prevTotal;
+    msgs.push(diff > 0
+      ? { text: `📈 ${money(diff)} more than last month${when}` }
+      : { level: 'good', text: `📉 ${money(-diff)} less than last month${when}` });
+  }
+  if (st.current && st.overallBudget > 0 && st.total < st.overallBudget) {
+    const daysLeft = daysIn(now) - now.getDate() + 1;
+    msgs.push({ go: 'budgets', text: `💡 Safe to spend: ${money((st.overallBudget - st.total) / daysLeft)} a day for the next ${daysLeft} day${daysLeft === 1 ? '' : 's'}` });
+  }
+  // The biggest payee you've paid more than once (a single big purchase isn't a habit).
+  const top = topPayees(list).find((x) => x.count >= 2);
+  if (top) msgs.push({ go: 'payees', text: `🏪 ${top.name}: ${top.count} times, ${money(top.total)} this month` });
+  const big = list.slice().sort((a, b) => b.amount - a.amount)[0];
+  if (big) msgs.push({ go: 'tx:' + big.id, text: `💸 Biggest expense: ${money(big.amount)} ${big.note || catLabel(big)} on ${fmtDay(big.date)}` });
+  if (prevTotal > 0) {
+    const better = state.categories.map((c) => ({ c, prev: sumOf(prevList.filter((t) => t.category === c.id)), cur: spentIn(c.id, st.mk) }))
+      .filter((x) => x.prev >= 300 && x.cur < x.prev * 0.75)
+      .sort((a, b) => a.cur / a.prev - b.cur / b.prev)[0];
+    if (better) {
+      msgs.push({ level: 'good', text: better.cur === 0
+        ? `🎉 Nothing spent on ${better.c.name} yet${st.current ? ' this month' : ''} (${money(better.prev)} last month${st.current ? ' by now' : ''})`
+        : `🎉 ${better.c.name} is ${Math.round((1 - better.cur / better.prev) * 100)}% lower than last month${st.current ? ' so far' : ''}` });
+    }
+  }
+  const since = state.lastBackupAt ? Math.floor((Date.now() - state.lastBackupAt) / 864e5) : null;
+  if (state.transactions.length >= 5 && (since === null || since >= 30)) {
+    msgs.push({ go: 'backup', text: since === null ? '💾 No backup yet. Tap to back up' : `💾 Last backup ${since} days ago. Tap to back up` });
+  }
+  return msgs;
+}
+
+let tickerMsgs = [];
+let tickerTimer = null;
+const reduceMotion = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+function renderTicker(st) {
+  const el = $('#ticker'), track = $('#tickerTrack');
+  clearInterval(tickerTimer);
+  tickerMsgs = tickerMessages(st);
+  el.hidden = !tickerMsgs.length;
+  if (!tickerMsgs.length) { track.innerHTML = ''; return; }
+  const item = (m, i) => `<button type="button" class="tick ${m.level || ''}" data-tick="${i}">${esc(m.text)}</button>`;
+  if (reduceMotion() || tickerMsgs.length === 1) {
+    // No scrolling: show one message at a time.
+    el.classList.add('static');
+    let i = 0;
+    const show = () => { const k = i++ % tickerMsgs.length; track.innerHTML = item(tickerMsgs[k], k); };
+    show();
+    if (tickerMsgs.length > 1) tickerTimer = setInterval(show, 4000);
+  } else {
+    el.classList.remove('static');
+    const once = tickerMsgs.map(item).join('<span class="tick-sep">•</span>') + '<span class="tick-sep">•</span>';
+    track.innerHTML = once + once; // two copies so the loop is seamless
+    track.style.animationDuration = Math.max(14, tickerMsgs.reduce((n, m) => n + m.text.length, 0) * 0.2) + 's';
+  }
+}
+function showBudgets() {
+  goto('settings');
+  // Scroll so the card sits just below the sticky header.
+  setTimeout(() => window.scrollTo({ top: $('#catBudgetCard').getBoundingClientRect().top + window.scrollY - 72, behavior: 'smooth' }), 50);
+}
+$('#budgetAlert').onclick = showBudgets;
+$('#ticker').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-tick]');
+  const m = b && tickerMsgs[+b.dataset.tick];
+  if (!m || !m.go) return;
+  if (m.go === 'budgets') showBudgets();
+  else if (m.go === 'payees') { payeeRange = 'month'; setDash('payees'); }
+  else if (m.go === 'backup') backup();
+  else if (m.go.startsWith('tx:')) openSheet(state.transactions.find((t) => t.id === m.go.slice(3)));
+});
+
+/* ---------- Dashboards: Overview | Trends | Payees ---------- */
+let dashView = 'overview';
+let trendCat = 'all';
+let payeeRange = 'month';
+function setDash(v) {
+  dashView = v;
+  ['overview', 'trends', 'payees'].forEach((d) => { $('#dash-' + d).hidden = d !== v; });
+  document.querySelectorAll('#dashSwitch [data-dash]').forEach((b) => b.classList.toggle('active', b.dataset.dash === v));
+  renderTrends(); renderPayees();
+  window.scrollTo({ top: 0 });
+}
+$('#dashSwitch').addEventListener('click', (e) => { const b = e.target.closest('[data-dash]'); if (b) setDash(b.dataset.dash); });
+
+function renderTrends() {
+  if (dashView !== 'trends') return;
+  const months = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = addMonths(viewMonth, -i);
+    const mk = monthKey(d);
+    months.push({ d, mk, total: sumOf(txIn(mk).filter((t) => trendCat === 'all' || t.category === trendCat)) });
+  }
+  const inWindow = months.flatMap((m) => txIn(m.mk));
+  const usedCats = state.categories.filter((c) => inWindow.some((t) => t.category === c.id));
+  if (trendCat !== 'all' && !usedCats.some((c) => c.id === trendCat)) trendCat = 'all';
+  $('#trendChips').innerHTML = [{ id: 'all', name: 'All', emoji: '' }, ...usedCats]
+    .map((c) => `<button class="chip small ${trendCat === c.id ? 'active' : ''}" data-trend-cat="${c.id}">${esc(c.emoji)} ${esc(c.name)}</button>`).join('');
+  const c = trendCat === 'all' ? null : catById(trendCat);
+  $('#trendTitle').textContent = c ? `${c.emoji} ${c.name}, last 6 months` : 'Last 6 months';
+  const nowMk = monthKey(new Date());
+  // Average over complete months that have data (the current month is still running).
+  const firstIdx = months.findIndex((m) => txIn(m.mk).length);
+  const full = firstIdx < 0 ? [] : months.slice(firstIdx).filter((m) => m.mk !== nowMk);
+  const avg = full.length ? sumOf(full.map((m) => ({ amount: m.total }))) / full.length : 0;
+  $('#trendAvg').textContent = avg ? `avg ${money(avg, true)}/month` : '';
+  const max = Math.max(...months.map((m) => m.total), 1);
+  $('#trendChart').innerHTML = months.map((m) => `
+    <button type="button" class="mc-col ${m.mk === monthKey(viewMonth) ? 'sel' : ''}" data-month="${m.mk}" title="${m.mk}: ${money(m.total)}">
+      <span class="mc-val">${m.total ? money(m.total, true) : ''}</span>
+      <span class="mc-bar" style="height:${Math.round((m.total / max) * 130)}px;${c ? `background:${c.color}` : ''}"></span>
+      <span class="mc-label">${monthShort(m.d)}${m.mk === nowMk ? '<small>so far</small>' : ''}</span>
+    </button>`).join('');
+  // Average per category over the same complete months.
+  const rows = state.categories.map((cat) => {
+    const per = full.map((m) => sumOf(txIn(m.mk).filter((t) => t.category === cat.id)));
+    const a = per.length ? per.reduce((x, y) => x + y, 0) / per.length : 0;
+    return { cat, avg: a, cur: spentIn(cat.id, monthKey(viewMonth)) };
+  }).filter((r) => r.avg > 0 || r.cur > 0).sort((a, b) => b.avg - a.avg);
+  $('#avgNote').textContent = full.length
+    ? `Based on ${full.length} full month${full.length === 1 ? '' : 's'} (${monthShort(full[0].d)}–${monthShort(full[full.length - 1].d)}). Compared with ${viewMonth.toLocaleDateString(undefined, { month: 'long' })}${monthKey(viewMonth) === nowMk ? ' so far' : ''}.`
+    : 'Not enough history yet: averages appear once a full month has passed.';
+  $('#avgList').innerHTML = rows.map((r) => {
+    const trend = !r.avg ? '' : r.cur > r.avg * 1.15 ? '<span class="up">▲</span>' : r.cur < r.avg * 0.85 ? '<span class="down">▼</span>' : '<span class="flat">●</span>';
+    return `<li data-trend-cat="${r.cat.id}">${catDot(r.cat)}<span class="name">${esc(r.cat.name)}</span>
+      <span class="avg-val">${r.avg ? money(Math.round(r.avg)) : '–'}<small>avg</small></span>
+      <span class="avg-val">${money(Math.round(r.cur))} ${trend}<small>this month</small></span></li>`;
+  }).join('') || '<li class="empty">No expenses in the last 6 months</li>';
+}
+$('#trendChips').addEventListener('click', (e) => { const b = e.target.closest('[data-trend-cat]'); if (b) { trendCat = b.dataset.trendCat; renderTrends(); } });
+$('#avgList').addEventListener('click', (e) => {
+  const li = e.target.closest('[data-trend-cat]');
+  if (li) { trendCat = li.dataset.trendCat; renderTrends(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+});
+$('#trendChart').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-month]');
+  if (!b) return;
+  const [y, m] = b.dataset.month.split('-').map(Number);
+  viewMonth = new Date(y, m - 1, 1);
+  setDash('overview');
+  renderAll();
+});
+
+function renderPayees() {
+  if (dashView !== 'payees') return;
+  const year = String(viewMonth.getFullYear());
+  const list = payeeRange === 'month' ? monthTx() : state.transactions.filter((t) => t.date.startsWith(year));
+  const all = topPayees(list);
+  const total = sumOf(list);
+  document.querySelectorAll('#payeeRange [data-range]').forEach((b) => b.classList.toggle('active', b.dataset.range === payeeRange));
+  $('#payeeTitle').textContent = payeeRange === 'month'
+    ? `Top payees · ${viewMonth.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}` : `Top payees · ${year}`;
+  const top3 = all.slice(0, 3).reduce((x, p) => x + p.total, 0);
+  $('#payeeSummary').textContent = all.length
+    ? `${all.length} payee${all.length === 1 ? '' : 's'} · top ${Math.min(3, all.length)} = ${total ? Math.round((top3 / total) * 100) : 0}% of spending` : '';
+  const max = all.length ? all[0].total : 1;
+  $('#payeeList').innerHTML = all.slice(0, 10).map((p, i) => `
+    <li data-payee="${esc(p.name)}">
+      <span class="rank">${i + 1}</span>${catDot(catById(p.cat))}
+      <div class="payee-main"><div class="tx-title">${esc(p.name)}</div>
+        <div class="tx-sub">${p.count}× · avg ${money(Math.round(p.total / p.count))}</div>
+        <div class="cb-track"><div style="width:${Math.round((p.total / max) * 100)}%;background:${catById(p.cat).color}"></div></div></div>
+      <div class="tx-amt">${money(p.total)}</div>
+    </li>`).join('') || '<li class="empty">No expenses with a payee or note in this period</li>';
+}
+$('#payeeRange').addEventListener('click', (e) => { const b = e.target.closest('[data-range]'); if (b) { payeeRange = b.dataset.range; renderPayees(); } });
+$('#payeeList').addEventListener('click', (e) => {
+  const li = e.target.closest('[data-payee]');
+  if (!li) return;
+  searchText = li.dataset.payee; filterCat = 'all'; filterSub = 'all';
+  $('#search').value = searchText;
+  goto('transactions');
+  renderTransactions();
+});
 
 function renderTransactions() {
   $('#filterChips').innerHTML = [{ id: 'all', name: 'All', emoji: '' }, ...state.categories]
