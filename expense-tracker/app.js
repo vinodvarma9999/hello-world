@@ -23,21 +23,45 @@ function guessCurrency() {
   return map[region] || 'INR';
 }
 
+const DEFAULT_STATE = () => ({
+  transactions: [], categories: DEFAULT_CATEGORIES.slice(), budget: 0, catBudgets: {},
+  merchantMap: {}, lastBackupAt: 0, currency: guessCurrency(),
+});
+
+/* Cleans stored or restored data so a damaged or hand-edited file can't break the app. */
+function normalize(s) {
+  const base = DEFAULT_STATE();
+  if (!s || typeof s !== 'object') return base;
+  const safeId = (v) => typeof v === 'string' && /^[\w-]{1,40}$/.test(v);
+  const categories = Array.isArray(s.categories) ? s.categories.filter((c) => c && safeId(c.id) && c.name).map((c) => ({
+    id: c.id, name: String(c.name).slice(0, 40), emoji: String(c.emoji || '🏷️').slice(0, 4),
+    color: /^#[0-9a-f]{6}$/i.test(c.color) ? c.color : '#64748b',
+  })) : [];
+  const cats = categories.length ? categories : base.categories;
+  const catIds = new Set(cats.map((c) => c.id));
+  const transactions = Array.isArray(s.transactions) ? s.transactions.filter((t) =>
+    t && safeId(t.id) && Number(t.amount) > 0 && /^\d{4}-\d{2}-\d{2}$/.test(t.date)).map((t) => ({
+    id: t.id, createdAt: Number(t.createdAt) || 0, amount: Math.round(Number(t.amount) * 100) / 100,
+    category: catIds.has(t.category) ? t.category : (catIds.has('other') ? 'other' : cats[0].id),
+    date: t.date, note: String(t.note || '').slice(0, 80), ...(t.smsRef ? { smsRef: String(t.smsRef).slice(0, 30) } : {}),
+  })) : [];
+  return {
+    transactions,
+    categories: cats,
+    budget: Math.max(0, Number(s.budget) || 0),
+    catBudgets: s.catBudgets && typeof s.catBudgets === 'object' ? s.catBudgets : {},
+    merchantMap: s.merchantMap && typeof s.merchantMap === 'object' ? s.merchantMap : {},
+    lastBackupAt: Number(s.lastBackupAt) || 0,
+    currency: CURRENCIES.includes(s.currency) ? s.currency : base.currency,
+  };
+}
+
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (raw) {
-      const s = JSON.parse(raw);
-      return {
-        transactions: Array.isArray(s.transactions) ? s.transactions : [],
-        categories: Array.isArray(s.categories) && s.categories.length ? s.categories : DEFAULT_CATEGORIES.slice(),
-        budget: Number(s.budget) || 0,
-        catBudgets: s.catBudgets && typeof s.catBudgets === 'object' ? s.catBudgets : {},
-        currency: s.currency || guessCurrency(),
-      };
-    }
+    if (raw) return normalize(JSON.parse(raw));
   } catch (e) { /* fall through to defaults */ }
-  return { transactions: [], categories: DEFAULT_CATEGORIES.slice(), budget: 0, catBudgets: {}, currency: guessCurrency() };
+  return DEFAULT_STATE();
 }
 
 let state = load();
@@ -215,6 +239,12 @@ function renderDashboard() {
       <div class="cb-amt">${money(r.sum)}<small>${r.budget ? 'of ' + money(r.budget) : pct + '%'}</small></div></li>`;
   }).join('') : '<li class="empty" style="display:block">No expenses this month yet</li>';
 
+  // backup reminder: data lives only on this phone
+  const sinceBackup = state.lastBackupAt ? Math.floor((Date.now() - state.lastBackupAt) / 864e5) : null;
+  const nudge = state.transactions.length >= 5 && (sinceBackup === null || sinceBackup >= 30);
+  $('#backupNudge').hidden = !nudge;
+  if (nudge) $('#backupNudgeText').textContent = sinceBackup === null ? 'You haven\'t backed up yet' : `Last backup ${sinceBackup} days ago`;
+
   // recent
   const recent = sortTx(list).slice(0, 5);
   $('#recentList').innerHTML = recent.length ? recent.map(txItem).join('')
@@ -249,6 +279,9 @@ function renderTransactions() {
 function renderSettings() {
   $('#budgetInput').value = state.budget || '';
   $('#currencySelect').innerHTML = CURRENCIES.map((c) => `<option ${c === state.currency ? 'selected' : ''}>${c}</option>`).join('');
+  $('#lastBackup').textContent = state.lastBackupAt
+    ? 'Last backup: ' + new Date(state.lastBackupAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+    : 'Last backup: never';
   const mk = monthKey(viewMonth);
   $('#catBudgetMonth').textContent = viewMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   $('#catBudgetList').innerHTML = state.categories.map((c) => {
@@ -327,11 +360,93 @@ function openSheet(tx) {
   $('#txNote').value = tx ? tx.note || '' : '';
   $('#deleteTx').hidden = !tx;
   pickedCat = tx ? tx.category : (state.categories[0] && state.categories[0].id);
+  pendingSms = null;
+  $('#smsBox').hidden = !!tx;
+  $('#smsText').hidden = true; $('#smsText').value = '';
+  $('#smsInfo').hidden = true;
   renderPicker();
   $('#sheetBackdrop').hidden = false;
   if (!tx) setTimeout(() => $('#txAmount').focus(), 50);
 }
 function closeSheet() { $('#sheetBackdrop').hidden = true; }
+
+/* ---------- Bank SMS import ---------- */
+let pendingSms = null;
+const fmtDay = (iso) => parseISO(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+
+function smsInfo(msg, level) {
+  const el = $('#smsInfo');
+  el.hidden = !msg;
+  el.className = 'cat-hint ' + (level || '');
+  el.textContent = msg || '';
+}
+
+// Fills the add-expense sheet from an SMS. The SMS text itself is never saved.
+function applySms(text) {
+  const r = SpendlySMS.parseSms(text);
+  if (pendingSms) {
+    // Clear values that came from a previously pasted SMS.
+    $('#txAmount').value = ''; $('#txNote').value = ''; $('#txDate').value = todayISO();
+    renderCatHint();
+  }
+  pendingSms = null;
+  if (!r.ok) {
+    const why = { empty: '', otp: 'That looks like an OTP message, not a payment.',
+      notice: 'That looks like a request or reminder, not a completed payment.',
+      'no-amount': 'Couldn\'t find an amount in that SMS. You can still fill it in by hand.' }[r.reason];
+    smsInfo(why, 'warn');
+    return false;
+  }
+  if (r.type === 'credit') {
+    smsInfo(`That SMS is money received (${money(r.amount)}${r.merchant ? ' from ' + r.merchant : ''}). Spendly only tracks spending, so nothing was filled in.`, 'warn');
+    return false;
+  }
+  const date = r.date || todayISO();
+  $('#txAmount').value = r.amount;
+  $('#txDate').value = date;
+  $('#txNote').value = r.merchant;
+  pickedCat = SpendlySMS.guessCategory(r.merchant, text, state.categories.map((c) => c.id), state.merchantMap);
+  pendingSms = { ref: r.ref, merchant: r.merchant };
+  renderPicker();
+  const dup = state.transactions.find((t) => (r.ref && t.smsRef === r.ref) ||
+    (t.amount === r.amount && t.date === date && (t.note || '').toLowerCase() === r.merchant.toLowerCase()));
+  if (dup) {
+    smsInfo(`⚠️ Looks like this is already recorded: ${money(dup.amount)} ${dup.note || catById(dup.category).name} on ${fmtDay(dup.date)}.`, 'over');
+  } else {
+    smsInfo(`Filled from SMS: ${money(r.amount)}${r.merchant ? ' to ' + r.merchant : ''} on ${fmtDay(date)}${r.date ? '' : ' (date not in SMS, using today)'}. Check the category and tap Save.`, 'ok');
+  }
+  return true;
+}
+
+function showSmsBox(text) {
+  $('#smsText').hidden = false;
+  if (text != null) $('#smsText').value = text;
+}
+
+async function pasteSms() {
+  openSheet(null);
+  let text = '';
+  try { text = navigator.clipboard && navigator.clipboard.readText ? await navigator.clipboard.readText() : ''; }
+  catch (e) { /* clipboard blocked: fall back to manual paste */ }
+  if (text && text.trim()) {
+    showSmsBox(text);
+    applySms(text);
+  } else {
+    showSmsBox('');
+    $('#smsText').focus();
+    smsInfo('Paste the bank SMS into the box above (tap and hold, then Paste).', '');
+  }
+}
+
+$('#smsBtn').onclick = pasteSms;
+$('#smsToggle').onclick = async () => {
+  if (!$('#smsText').hidden && !$('#smsText').value) { $('#smsText').hidden = true; smsInfo(''); return; }
+  let text = '';
+  try { text = navigator.clipboard && navigator.clipboard.readText ? await navigator.clipboard.readText() : ''; } catch (e) { /* manual */ }
+  showSmsBox(text || '');
+  if (text && text.trim()) applySms(text); else { $('#smsText').focus(); smsInfo('Paste the bank SMS into the box above.', ''); }
+};
+$('#smsText').addEventListener('input', (e) => { if (e.target.value.trim()) applySms(e.target.value); else smsInfo(''); });
 
 $('#fab').onclick = () => openSheet(null);
 $('#cancelTx').onclick = closeSheet;
@@ -353,7 +468,13 @@ $('#txForm').addEventListener('submit', (e) => {
     Object.assign(state.transactions.find((t) => t.id === id), data);
     toast('Expense updated');
   } else {
-    state.transactions.push({ id: uid(), createdAt: Date.now(), ...data });
+    const tx = { id: uid(), createdAt: Date.now(), ...data };
+    if (pendingSms) {
+      if (pendingSms.ref) tx.smsRef = pendingSms.ref;
+      // Remember the category chosen for this payee so next time it's picked automatically.
+      if (pendingSms.merchant) state.merchantMap[pendingSms.merchant.toLowerCase()] = data.category;
+    }
+    state.transactions.push(tx);
     toast('Expense added');
   }
   save(); closeSheet(); renderAll();
@@ -441,9 +562,55 @@ $('#exportCsv').onclick = () => {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 };
+/* ---------- Backup & restore ---------- */
+async function backup() {
+  const stamp = Date.now();
+  const payload = { app: 'spendly', version: 1, exportedAt: new Date(stamp).toISOString(),
+    data: { ...state, lastBackupAt: stamp } };
+  const name = `spendly-backup-${todayISO()}.json`;
+  const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' });
+  try {
+    const file = new File([blob], name, { type: 'application/json' });
+    // On iPhone this opens the share sheet: choose "Save to Files" (e.g. iCloud Drive).
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'Spendly backup' });
+      return markBackedUp(stamp);
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return; // user closed the share sheet
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  markBackedUp(stamp);
+}
+function markBackedUp(stamp) {
+  state.lastBackupAt = stamp;
+  save(); renderAll(); toast('Backup saved');
+}
+$('#backupBtn').onclick = backup;
+$('#backupNudgeBtn').onclick = backup;
+$('#restoreFile').addEventListener('change', async (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  let p;
+  try { p = JSON.parse(await f.text()); } catch (err) { toast('That file isn\'t a Spendly backup'); return; }
+  if (!p || p.app !== 'spendly' || !p.data || !Array.isArray(p.data.transactions)) { toast('That file isn\'t a Spendly backup'); return; }
+  const restored = normalize(p.data);
+  const when = p.exportedAt ? new Date(p.exportedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : 'an unknown date';
+  if (!confirm(`Restore the backup from ${when} with ${restored.transactions.length} expenses?\n\nThis replaces everything currently in Spendly (${state.transactions.length} expenses).`)) return;
+  state = restored;
+  state.lastBackupAt = state.lastBackupAt || Date.now();
+  fmtCache = {};
+  save(); renderAll(); toast('Backup restored');
+});
+
 $('#clearAll').onclick = () => {
   if (!confirm('Delete ALL expenses and reset categories? This cannot be undone.')) return;
-  state = { transactions: [], categories: DEFAULT_CATEGORIES.slice(), budget: 0, catBudgets: {}, currency: state.currency };
+  state = { ...DEFAULT_STATE(), currency: state.currency, lastBackupAt: state.lastBackupAt };
   save(); renderAll(); toast('All data deleted');
 };
 

@@ -178,3 +178,20 @@ input[type=color] { width: 44px; height: 44px; border: 0; padding: 0; background
 .cat-hint[hidden] { display: none; }
 .cat-hint.warn { color: var(--warn); }
 .cat-hint.over { color: var(--danger); font-weight: 600; }
+
+/* Bank SMS */
+.sms-btn { width: 100%; border: 1px dashed color-mix(in srgb, var(--primary) 55%, transparent); background: color-mix(in srgb, var(--primary) 8%, var(--card)); color: var(--primary); font-weight: 650; border-radius: 14px; padding: 12px; margin-bottom: 14px; cursor: pointer; }
+.sms-box { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.sms-box[hidden] { display: none; }
+.sms-box .link { padding: 0; }
+.sms-box textarea { width: 100%; border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 10px 12px; font: inherit; font-size: 13px; resize: vertical; outline: none; }
+.sms-box textarea:focus { border-color: var(--primary); }
+.sms-box .cat-hint { width: 100%; }
+.cat-hint.ok { color: #15803d; }
+.howto summary { cursor: pointer; font-weight: 600; color: var(--primary); }
+.howto ol { padding-left: 20px; margin: 10px 0; font-size: 14px; line-height: 1.5; }
+
+/* Backup */
+.nudge { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); font-size: 14px; }
+.nudge[hidden] { display: none; }
+label.btn { display: inline-block; }
