@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cut">
+  <title>Spendly</title>
+  <meta name="description" content="Track your daily expenses by category.">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Spendly">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><img src="icons/icon.svg" alt="" width="28" height="28"><span>Spendly</span></div>
+      <div class="month-switch">
+        <button class="icon-btn" id="prevMonth" aria-label="Previous month">‹</button>
+        <span id="monthLabel"></span>
+        <button class="icon-btn" id="nextMonth" aria-label="Next month">›</button>
+      </div>
+    </header>
+
+    <main>
+      <!-- DASHBOARD -->
+      <section class="screen active" id="screen-dashboard">
+        <div class="hero card">
+          <div class="hero-label">Spent this month</div>
+          <div class="hero-amount" id="monthTotal">0</div>
+          <div class="budget" id="budgetBox">
+            <div class="bar"><div class="bar-fill" id="budgetFill"></div></div>
+            <div class="budget-text" id="budgetText"></div>
+          </div>
+        </div>
+
+        <div class="stats">
+          <div class="card stat"><div class="stat-label">Today</div><div class="stat-value" id="todayTotal">0</div></div>
+          <div class="card stat"><div class="stat-label">Daily avg</div><div class="stat-value" id="dailyAvg">0</div></div>
+          <div class="card stat"><div class="stat-label">Entries</div><div class="stat-value" id="txCount">0</div></div>
+        </div>
+
+        <div class="card">
+          <h2>Last 7 days</h2>
+          <div class="week-chart" id="weekChart"></div>
+        </div>
+
+        <div class="card">
+          <h2>By category</h2>
+          <div class="donut-wrap">
+            <svg viewBox="0 0 42 42" class="donut" id="donut" aria-hidden="true"></svg>
+            <div class="donut-center"><span id="donutTop">—</span><small>top category</small></div>
+          </div>
+          <ul class="cat-breakdown" id="catBreakdown"></ul>
+        </div>
+
+        <div class="card">
+          <div class="row-between"><h2>Recent</h2><button class="link" data-goto="transactions">See all</button></div>
+          <ul class="tx-list" id="recentList"></ul>
+        </div>
+      </section>
+
+      <!-- TRANSACTIONS -->
+      <section class="screen" id="screen-transactions">
+        <div class="filters">
+          <input type="search" id="search" placeholder="Search notes…" aria-label="Search">
+          <div class="chips" id="filterChips"></div>
+        </div>
+        <div id="txGroups"></div>
+      </section>
+
+      <!-- CATEGORIES / SETTINGS -->
+      <section class="screen" id="screen-settings">
+        <div class="card">
+          <h2>Monthly budget</h2>
+          <div class="field-row">
+            <input type="number" inputmode="decimal" min="0" step="any" id="budgetInput" placeholder="e.g. 20000">
+            <button class="btn" id="saveBudget">Save</button>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Currency</h2>
+          <select id="currencySelect"></select>
+        </div>
+        <div class="card">
+          <h2>Categories</h2>
+          <ul class="cat-manage" id="catManage"></ul>
+          <form class="field-row" id="addCatForm">
+            <input type="text" id="newCatEmoji" maxlength="2" placeholder="🙂" class="emoji-input" aria-label="Emoji">
+            <input type="text" id="newCatName" placeholder="New category" required>
+            <input type="color" id="newCatColor" value="#8b5cf6" aria-label="Colour">
+            <button class="btn" type="submit">Add</button>
+          </form>
+        </div>
+        <div class="card">
+          <h2>Data</h2>
+          <div class="field-row wrap">
+            <button class="btn ghost" id="exportCsv">Export CSV</button>
+            <button class="btn ghost danger" id="clearAll">Delete all data</button>
+          </div>
+          <p class="muted">Your data stays on this device only.</p>
+        </div>
+      </section>
+    </main>
+
+    <button class="fab" id="fab" aria-label="Add expense">+</button>
+
+    <nav class="tabbar">
+      <button class="tab active" data-goto="dashboard"><svg class="tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9v9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/></svg>Dashboard</button>
+      <button class="tab" data-goto="transactions"><svg class="tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>Transactions</button>
+      <button class="tab" data-goto="settings"><svg class="tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>Categories</button>
+    </nav>
+  </div>
+
+  <!-- Add / edit sheet -->
+  <div class="sheet-backdrop" id="sheetBackdrop" hidden>
+    <form class="sheet" id="txForm">
+      <div class="sheet-handle"></div>
+      <h2 id="sheetTitle">Add expense</h2>
+      <input type="hidden" id="txId">
+      <label class="amount-field">
+        <span id="currencySymbol">₹</span>
+        <input type="number" inputmode="decimal" step="any" min="0.01" id="txAmount" placeholder="0" required>
+      </label>
+      <div class="cat-picker" id="catPicker"></div>
+      <div class="field-row">
+        <input type="date" id="txDate" required aria-label="Date">
+      </div>
+      <input type="text" id="txNote" placeholder="Note (optional)" maxlength="80">
+      <div class="field-row">
+        <button type="button" class="btn ghost danger" id="deleteTx" hidden>Delete</button>
+        <button type="button" class="btn ghost" id="cancelTx">Cancel</button>
+        <button type="submit" class="btn grow">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>
