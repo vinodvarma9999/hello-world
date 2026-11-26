@@ -2,7 +2,7 @@
 
 /* ---------- Storage ---------- */
 const STORE_KEY = 'spendly.v1';
-const APP_VERSION = 4; // keep in step with VERSION in sw.js
+const APP_VERSION = 5; // keep in step with VERSION in sw.js
 
 const DEFAULT_CATEGORIES = [
   { id: 'food', name: 'Food', emoji: '🍔', color: '#f97316' },
@@ -26,7 +26,7 @@ function guessCurrency() {
 
 const DEFAULT_STATE = () => ({
   transactions: [], categories: DEFAULT_CATEGORIES.slice(), budget: 0, catBudgets: {},
-  merchantMap: {}, lastBackupAt: 0, currency: guessCurrency(),
+  merchantMap: {}, importedKeys: [], lastImportAt: 0, lastBackupAt: 0, currency: guessCurrency(),
 });
 
 /* Cleans stored or restored data so a damaged or hand-edited file can't break the app. */
@@ -52,6 +52,8 @@ function normalize(s) {
     budget: Math.max(0, Number(s.budget) || 0),
     catBudgets: s.catBudgets && typeof s.catBudgets === 'object' ? s.catBudgets : {},
     merchantMap: s.merchantMap && typeof s.merchantMap === 'object' ? s.merchantMap : {},
+    importedKeys: Array.isArray(s.importedKeys) ? s.importedKeys.filter((k) => typeof k === 'string' && /^[a-z0-9]{1,40}$/i.test(k)).slice(-3000) : [],
+    lastImportAt: Number(s.lastImportAt) || 0,
     lastBackupAt: Number(s.lastBackupAt) || 0,
     currency: CURRENCIES.includes(s.currency) ? s.currency : base.currency,
   };
@@ -280,6 +282,9 @@ function renderTransactions() {
 function renderSettings() {
   $('#budgetInput').value = state.budget || '';
   $('#currencySelect').innerHTML = CURRENCIES.map((c) => `<option ${c === state.currency ? 'selected' : ''}>${c}</option>`).join('');
+  $('#lastImport').textContent = state.lastImportAt
+    ? 'Last inbox import: ' + new Date(state.lastImportAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+    : '';
   $('#appVersion').textContent = `Spendly version ${APP_VERSION}`;
   $('#lastBackup').textContent = state.lastBackupAt
     ? 'Last backup: ' + new Date(state.lastBackupAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
@@ -564,6 +569,96 @@ $('#exportCsv').onclick = () => {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 };
+/* ---------- SMS inbox import ---------- */
+// The iPhone Shortcut appends every bank SMS to a text file; this imports them all at once.
+let importItems = [];
+
+$('#inboxFile').addEventListener('change', async (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  let text;
+  try { text = await f.text(); } catch (err) { toast('Couldn\'t read that file'); return; }
+  openImport(text);
+});
+
+function openImport(text) {
+  const chunks = SpendlySMS.splitInbox(text);
+  if (!chunks.length) { toast('That file has no messages yet'); return; }
+  const seen = new Set(state.importedKeys);
+  const inFile = new Set();
+  const catIds = state.categories.map((c) => c.id);
+  let earlier = 0, skipped = 0;
+  importItems = [];
+  for (const ch of chunks) {
+    const r = SpendlySMS.parseSms(ch.sms);
+    const key = SpendlySMS.smsKey(ch.sms, r.ok ? r.ref : '');
+    if (inFile.has(key) || seen.has(key)) { earlier++; continue; }
+    inFile.add(key);
+    if (!r.ok || r.type === 'credit') { skipped++; importItems.push({ key, skip: true }); continue; }
+    const date = r.date || ch.receivedDate || todayISO();
+    const merchant = r.merchant;
+    const already = state.transactions.some((t) => (r.ref && t.smsRef === r.ref) ||
+      (t.amount === r.amount && t.date === date && (t.note || '').toLowerCase() === merchant.toLowerCase()));
+    importItems.push({
+      key, amount: r.amount, date, merchant, ref: r.ref, already, checked: !already,
+      category: SpendlySMS.guessCategory(merchant, ch.sms, catIds, state.merchantMap),
+    });
+  }
+  const shown = importItems.filter((i) => !i.skip);
+  const fresh = shown.filter((i) => !i.already).length;
+  const parts = [`${chunks.length} message${chunks.length === 1 ? '' : 's'} in the file`, `${fresh} new expense${fresh === 1 ? '' : 's'}`];
+  if (earlier) parts.push(`${earlier} already imported or duplicate`);
+  if (skipped) parts.push(`${skipped} skipped (money received, OTPs or not payments)`);
+  $('#importSummary').textContent = parts.join(' · ');
+  const opts = (sel) => state.categories.map((c) => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.emoji)} ${esc(c.name)}</option>`).join('');
+  $('#importList').innerHTML = shown.length ? shown.map((it) => {
+    const i = importItems.indexOf(it);
+    return `<li class="imp ${it.already ? 'dim' : ''}" data-i="${i}">
+      <input type="checkbox" ${it.checked ? 'checked' : ''} aria-label="Add this expense">
+      <div class="imp-main">
+        <div class="tx-title">${esc(it.merchant || 'Unknown payee')}</div>
+        <div class="tx-sub">${fmtDay(it.date)}${it.already ? ' · <b>already added</b>' : ''}</div>
+        <select aria-label="Category">${opts(it.category)}</select>
+      </div>
+      <div class="tx-amt">${money(it.amount)}</div>
+    </li>`;
+  }).join('') : '<li class="empty">Nothing new to add. You\'re up to date.</li>';
+  updateImportButton();
+  $('#importBackdrop').hidden = false;
+}
+
+function updateImportButton() {
+  const n = importItems.filter((i) => !i.skip && i.checked).length;
+  $('#importConfirm').textContent = n ? `Add ${n} expense${n === 1 ? '' : 's'}` : 'Done';
+}
+$('#importList').addEventListener('change', (e) => {
+  const li = e.target.closest('.imp');
+  if (!li) return;
+  const it = importItems[+li.dataset.i];
+  if (e.target.type === 'checkbox') it.checked = e.target.checked;
+  if (e.target.tagName === 'SELECT') it.category = e.target.value;
+  updateImportButton();
+});
+const closeImport = () => { $('#importBackdrop').hidden = true; importItems = []; };
+$('#importCancel').onclick = closeImport;
+$('#importBackdrop').addEventListener('click', (e) => { if (e.target.id === 'importBackdrop') closeImport(); });
+$('#importConfirm').onclick = () => {
+  let added = 0;
+  for (const it of importItems) {
+    if (it.skip || !it.checked) continue;
+    state.transactions.push({ id: uid(), createdAt: Date.now() + added, amount: it.amount, category: it.category,
+      date: it.date, note: it.merchant, ...(it.ref ? { smsRef: it.ref } : {}) });
+    if (it.merchant) state.merchantMap[it.merchant.toLowerCase()] = it.category;
+    added++;
+  }
+  // Remember every message reviewed (ticked or not) so it isn't offered again.
+  state.importedKeys = state.importedKeys.concat(importItems.map((i) => i.key)).slice(-3000);
+  state.lastImportAt = Date.now();
+  save(); closeImport(); renderAll();
+  toast(added ? `Added ${added} expense${added === 1 ? '' : 's'}` : 'Inbox checked, nothing added');
+};
+
 /* ---------- Backup & restore ---------- */
 async function backup() {
   const stamp = Date.now();

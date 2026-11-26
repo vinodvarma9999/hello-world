@@ -16,6 +16,7 @@ No sign-up, no server: your data stays on your device and it works offline.
 - **Categories**: 8 built-in categories (Food, Groceries, Transport, Shopping, Bills, Health, Entertainment, Other). You can add your own with an emoji and colour, or delete them.
 - **Category budgets**: set a monthly limit for each category. A budget carries forward to the following months until you change it, so you can revise it month by month (use ‹ › to pick the month) without changing past months. The dashboard shows how much is left or over for each category (amber at 80%, red when over), the add-expense sheet shows what's left as you type, and you get a warning when an expense takes a category over its budget.
 - **Bank SMS import**: copy a bank or UPI SMS and tap **📋 Paste bank SMS**. Spendly fills in the amount, payee and date, and suggests a category (Swiggy → Food, Uber → Transport, …). It remembers the category you pick for each payee. It warns if the SMS is already recorded, and ignores money-received SMS, OTPs and payment requests. The SMS is read on the phone and never stored or sent anywhere. On iPhone, a Shortcuts automation can copy bank SMS for you automatically; the steps are in the app under Categories → Bank SMS.
+- **SMS inbox import (iPhone automation)**: a Shortcuts automation adds every bank SMS to `Spendly inbox.txt` in iCloud Drive, with no taps. Whenever you like, tap **📥 Import SMS inbox** and pick that file. Spendly lists the new expenses with suggested categories; untick or re-categorise any, then tap **Add**. Messages already imported, duplicates, money-received SMS and OTPs are skipped, so the file never needs emptying. Setup steps are in the app under Categories → Bank SMS.
 - **Backup & restore**: **Back up now** saves a `.json` file (on iPhone choose *Save to Files* → iCloud Drive). **Restore from file** brings everything back (expenses, categories, budgets). The dashboard reminds you if you haven't backed up in 30 days.
 - **Settings**: overall monthly budget (optional; otherwise the total of your category budgets is used), currency (₹, $, €, £ and more), CSV export, delete all data.
 - Browse previous months with the ‹ › arrows in the header.
@@ -46,7 +47,7 @@ expense-tracker/
 ├── index.html      # app shell: dashboard, transactions, categories screens
 ├── styles.css      # mobile-first styling, dark mode
 ├── app.js          # state, rendering, charts, backup/restore, localStorage persistence
-├── sms.js          # reads bank/UPI SMS: amount, payee, date, reference; suggests a category
+├── sms.js          # reads bank/UPI SMS (single or a whole inbox file): amount, payee, date, reference; suggests a category
 ├── manifest.json   # PWA manifest (name, icons, standalone display)
 ├── sw.js           # service worker for offline use
 └── icons/          # app icon (SVG source + generated PNGs)
