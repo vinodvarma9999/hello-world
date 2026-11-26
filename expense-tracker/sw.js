@@ -1,6 +1,6 @@
 // Offline cache for Spendly. Bump VERSION when files change.
-const VERSION = 'spendly-v2';
-const ASSETS = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.json',
+const VERSION = 'spendly-v3';
+const ASSETS = ['./', 'index.html', 'styles.css', 'app.js', 'sms.js', 'manifest.json',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {

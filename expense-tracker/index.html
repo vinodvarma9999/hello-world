@@ -39,6 +39,13 @@
           </div>
         </div>
 
+        <button class="sms-btn" id="smsBtn">📋 Paste bank SMS</button>
+
+        <div class="card nudge" id="backupNudge" hidden>
+          <span><b id="backupNudgeText"></b><br><span class="muted">Your expenses are only on this phone.</span></span>
+          <button class="btn" id="backupNudgeBtn">Back up</button>
+        </div>
+
         <div class="stats">
           <div class="card stat"><div class="stat-label">Today</div><div class="stat-value" id="todayTotal">0</div></div>
           <div class="card stat"><div class="stat-label">Daily avg</div><div class="stat-value" id="dailyAvg">0</div></div>
@@ -105,12 +112,36 @@
           </form>
         </div>
         <div class="card">
+          <h2>Backup &amp; restore</h2>
+          <p class="muted hint-top">Your expenses are stored only on this phone. Deleting the app from your home screen deletes them too, so keep a backup in Files or iCloud Drive.</p>
+          <div class="field-row wrap">
+            <button class="btn" id="backupBtn">Back up now</button>
+            <label class="btn ghost" for="restoreFile">Restore from file</label>
+            <input type="file" id="restoreFile" accept=".json,application/json" hidden>
+          </div>
+          <p class="muted" id="lastBackup"></p>
+        </div>
+        <div class="card">
+          <h2>Bank SMS</h2>
+          <p class="muted hint-top">Tap <b>📋 Paste bank SMS</b> on the dashboard after copying a bank message. Spendly reads the amount, payee and date on your phone; the SMS itself isn't saved or sent anywhere.</p>
+          <details class="howto">
+            <summary>iPhone: copy bank SMS automatically</summary>
+            <ol>
+              <li>Open the <b>Shortcuts</b> app → <b>Automation</b> → <b>+</b> → <b>Message</b>.</li>
+              <li>Tap <b>Message Contains</b>, type <b>debited</b>, choose <b>Run Immediately</b>, then <b>Next</b> → <b>New Blank Automation</b>.</li>
+              <li>Add the action <b>Copy to Clipboard</b> and set its input to <b>Shortcut Input</b> (pick <b>Content</b> if asked).</li>
+              <li>Add <b>Show Notification</b> with the text “Bank SMS copied – open Spendly”. Tap <b>Done</b>.</li>
+              <li>Repeat for other words your bank uses, e.g. <b>spent</b> or <b>Sent Rs</b>.</li>
+            </ol>
+            <p class="muted">Then open Spendly and tap Paste bank SMS. iPhone asks you to allow the paste each time.</p>
+          </details>
+        </div>
+        <div class="card">
           <h2>Data</h2>
           <div class="field-row wrap">
             <button class="btn ghost" id="exportCsv">Export CSV</button>
             <button class="btn ghost danger" id="clearAll">Delete all data</button>
           </div>
-          <p class="muted">Your data stays on this device only.</p>
         </div>
       </section>
     </main>
@@ -130,6 +161,11 @@
       <div class="sheet-handle"></div>
       <h2 id="sheetTitle">Add expense</h2>
       <input type="hidden" id="txId">
+      <div class="sms-box" id="smsBox">
+        <button type="button" class="link" id="smsToggle">📋 Fill from bank SMS</button>
+        <textarea id="smsText" rows="3" placeholder="Paste the bank SMS here" hidden></textarea>
+        <div class="cat-hint" id="smsInfo" hidden></div>
+      </div>
       <label class="amount-field">
         <span id="currencySymbol">₹</span>
         <input type="number" inputmode="decimal" step="any" min="0.01" id="txAmount" placeholder="0" required>
@@ -149,6 +185,7 @@
   </div>
 
   <div class="toast" id="toast" role="status"></div>
+  <script src="sms.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
