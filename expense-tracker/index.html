@@ -39,7 +39,11 @@
           </div>
         </div>
 
-        <button class="sms-btn" id="smsBtn">📋 Paste bank SMS</button>
+        <div class="sms-row">
+          <button class="sms-btn" id="smsBtn">📋 Paste SMS</button>
+          <label class="sms-btn" for="inboxFile">📥 Import SMS inbox</label>
+          <input type="file" id="inboxFile" accept=".txt,text/plain" hidden>
+        </div>
 
         <div class="card nudge" id="backupNudge" hidden>
           <span><b id="backupNudgeText"></b><br><span class="muted">Your expenses are only on this phone.</span></span>
@@ -123,18 +127,30 @@
         </div>
         <div class="card">
           <h2>Bank SMS</h2>
-          <p class="muted hint-top">Tap <b>📋 Paste bank SMS</b> on the dashboard after copying a bank message. Spendly reads the amount, payee and date on your phone; the SMS itself isn't saved or sent anywhere.</p>
-          <details class="howto">
-            <summary>iPhone: copy bank SMS automatically</summary>
+          <p class="muted hint-top">Spendly reads the amount, payee and date on your phone. SMS text isn't saved or sent anywhere.</p>
+          <details class="howto" open>
+            <summary>iPhone: collect bank SMS automatically (recommended)</summary>
+            <p class="muted">Set this up once. Every bank SMS is then added to a file in iCloud Drive, and you import them all with <b>📥 Import SMS inbox</b> whenever you like.</p>
             <ol>
-              <li>Open the <b>Shortcuts</b> app → <b>Automation</b> → <b>+</b> → <b>Message</b>.</li>
-              <li>Tap <b>Message Contains</b>, type <b>debited</b>, choose <b>Run Immediately</b>, then <b>Next</b> → <b>New Blank Automation</b>.</li>
-              <li>Add the action <b>Copy to Clipboard</b> and set its input to <b>Shortcut Input</b> (pick <b>Content</b> if asked).</li>
-              <li>Add <b>Show Notification</b> with the text “Bank SMS copied – open Spendly”. Tap <b>Done</b>.</li>
-              <li>Repeat for other words your bank uses, e.g. <b>spent</b> or <b>Sent Rs</b>.</li>
+              <li>Open the <b>Shortcuts</b> app → <b>Automation</b> tab → <b>+</b> (or <b>New Automation</b>) → <b>Message</b>.</li>
+              <li>Tap <b>Message Contains</b> and type <b>debited</b>. Choose <b>Run Immediately</b>, then tap <b>Next</b> → <b>New Blank Automation</b>.</li>
+              <li>Add the action <b>Text</b>. In its box:
+                <ul>
+                  <li>tap <b>Shortcut Input</b> above the keyboard (if it offers choices, pick <b>Content</b>),</li>
+                  <li>start a new line and type <b>Received: </b> then tap <b>Current Date</b>,</li>
+                  <li>start a new line and type <b>---</b> (three dashes).</li>
+                </ul>
+              </li>
+              <li>Add the action <b>Append to Text File</b>. Set the file to <b>Spendly inbox.txt</b> and turn on <b>Make New Line</b>. Tap <b>Done</b>.</li>
+              <li>Repeat steps 1–4 for other words your bank uses, such as <b>spent</b> and <b>Sent Rs</b>. Messages caught twice are only imported once.</li>
             </ol>
-            <p class="muted">Then open Spendly and tap Paste bank SMS. iPhone asks you to allow the paste each time.</p>
+            <p class="muted">To import: tap <b>📥 Import SMS inbox</b> → <b>Browse</b> → <b>iCloud Drive</b> → <b>Shortcuts</b> → <b>Spendly inbox.txt</b>. You never need to empty the file: messages already imported are skipped.</p>
           </details>
+          <details class="howto">
+            <summary>Just one SMS?</summary>
+            <p class="muted">In Messages, tap and hold the SMS → <b>Copy</b>, then tap <b>📋 Paste SMS</b> in Spendly.</p>
+          </details>
+          <p class="muted" id="lastImport"></p>
         </div>
         <div class="card">
           <h2>Data</h2>
@@ -183,6 +199,21 @@
         <button type="submit" class="btn grow">Save</button>
       </div>
     </form>
+  </div>
+
+  <!-- SMS inbox review -->
+  <div class="sheet-backdrop" id="importBackdrop" hidden>
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <h2>Import SMS inbox</h2>
+      <p class="muted" id="importSummary"></p>
+      <ul class="import-list" id="importList"></ul>
+      <p class="muted small">Untick anything you don't want. Unticked messages won't be offered again.</p>
+      <div class="field-row">
+        <button type="button" class="btn ghost" id="importCancel">Cancel</button>
+        <button type="button" class="btn grow" id="importConfirm">Add expenses</button>
+      </div>
+    </div>
   </div>
 
   <div class="toast" id="toast" role="status"></div>

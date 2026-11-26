@@ -57,6 +57,8 @@
     if (m) return validDate(+m[3], +m[2], +m[1]);
     m = text.match(/\b(\d{1,2})[\s\-]?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s\-,]*(\d{4}|\d{2})\b/i);
     if (m) return validDate(+m[3], MONTHS[m[2].toLowerCase()], +m[1]);
+    m = text.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2}),?\s+(\d{4})\b/i); // Nov 26, 2026
+    if (m) return validDate(+m[3], MONTHS[m[1].toLowerCase()], +m[2]);
     return null;
   }
 
@@ -125,7 +127,7 @@
 
   /* Guess a category id from the payee. Learned choices win over keywords. */
   const KEYWORDS = {
-    food: /\b(swiggy|zomato|eatsure|restaurant|cafe|caf[eé]|dominos?|pizza|kfc|mcdonald'?s?|burger|starbucks|chaayos|haldiram|biryani|bakery|food|dhaba|eats?)\b/i,
+    food: /\b(swiggy|zomato|eatsure|restaurant|cafe|caf[eé]|dominos?|pizza|kfc|mcdonald'?s?|burger|starbucks|chaayos|haldiram|biryani|bakery|food|dhaba|eats?|chai|tea|coffee|juice|sweets)\b/i,
     groceries: /\b(bigbasket|big basket|blinkit|zepto|instamart|dmart|d mart|jiomart|grofers|supermarket|kirana|reliance fresh|nature'?s basket|ratnadeep|spencers?|milk|dairy|vegetables?)\b/i,
     transport: /\b(uber|ola|rapido|irctc|metro|petrol|diesel|fuel|hpcl|bpcl|iocl|indian oil|bharat petroleum|fastag|redbus|indigo|air india|akasa|vistara|makemytrip|yatra|parking|toll|namma yatri)\b/i,
     shopping: /\b(amazon|flipkart|myntra|ajio|meesho|nykaa|croma|reliance digital|tata cliq|decathlon|ikea|lifestyle|westside|zara|h&m|snapdeal)\b/i,
@@ -148,7 +150,41 @@
     return has('other') ? 'other' : categoryIds[0];
   }
 
-  const api = { parseSms, guessCategory };
+  /*
+   * The iPhone Shortcut appends each bank SMS to a text file like this:
+   *   <SMS text>
+   *   Received: 26 Nov 2026 at 10:15 AM
+   *   ---
+   * splitInbox turns that file back into separate messages.
+   */
+  function splitInbox(text) {
+    const src = String(text || '').replace(/\r\n?/g, '\n');
+    const hasSeparators = /^\s*-{3,}\s*$/m.test(src);
+    const chunks = hasSeparators ? src.split(/^\s*-{3,}\s*$/m) : src.split(/\n\s*\n/);
+    const out = [];
+    for (const chunk of chunks) {
+      let receivedDate = null;
+      const lines = chunk.split('\n').filter((l) => {
+        const m = l.match(/^\s*received\s*[:\-]\s*(.+)$/i);
+        if (m) { receivedDate = findDate(m[1]); return false; }
+        return true;
+      });
+      const sms = lines.join('\n').trim();
+      if (sms) out.push({ sms, receivedDate });
+    }
+    return out;
+  }
+
+  // A stable ID for a message, so importing the same inbox again skips it.
+  function smsKey(sms, ref) {
+    if (ref) return 'r' + ref;
+    const t = String(sms).toLowerCase().replace(/\s+/g, ' ').trim();
+    let h = 0x811c9dc5;
+    for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    return 'h' + h.toString(36) + t.length.toString(36);
+  }
+
+  const api = { parseSms, guessCategory, splitInbox, smsKey, parseDate: findDate };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SpendlySMS = api;
 })(typeof window !== 'undefined' ? window : this);
