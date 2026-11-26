@@ -32,11 +32,12 @@ function load() {
         transactions: Array.isArray(s.transactions) ? s.transactions : [],
         categories: Array.isArray(s.categories) && s.categories.length ? s.categories : DEFAULT_CATEGORIES.slice(),
         budget: Number(s.budget) || 0,
+        catBudgets: s.catBudgets && typeof s.catBudgets === 'object' ? s.catBudgets : {},
         currency: s.currency || guessCurrency(),
       };
     }
   } catch (e) { /* fall through to defaults */ }
-  return { transactions: [], categories: DEFAULT_CATEGORIES.slice(), budget: 0, currency: guessCurrency() };
+  return { transactions: [], categories: DEFAULT_CATEGORIES.slice(), budget: 0, catBudgets: {}, currency: guessCurrency() };
 }
 
 let state = load();
@@ -96,6 +97,25 @@ let searchText = '';
 
 const monthKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 const monthTx = () => state.transactions.filter((t) => t.date.startsWith(monthKey(viewMonth)));
+/* Category budgets are stored per month ('YYYY-MM' -> { catId: amount }).
+   A month uses the most recent value set in that month or any earlier month,
+   so a budget carries forward until it is revised. */
+function catBudget(catId, mk = monthKey(viewMonth)) {
+  let best = null;
+  for (const k of Object.keys(state.catBudgets)) {
+    if (k <= mk && state.catBudgets[k][catId] != null && (best === null || k > best)) best = k;
+  }
+  return best === null ? 0 : Number(state.catBudgets[best][catId]) || 0;
+}
+const catBudgetTotal = (mk) => state.categories.reduce((s, c) => s + catBudget(c.id, mk), 0);
+const spentIn = (catId, mk, excludeId) => state.transactions
+  .filter((t) => t.category === catId && t.date.startsWith(mk) && t.id !== excludeId)
+  .reduce((s, t) => s + t.amount, 0);
+function budgetLevel(spent, budget) {
+  if (!budget) return '';
+  return spent > budget ? 'over' : spent >= budget * 0.8 ? 'warn' : 'ok';
+}
+
 const sortTx = (list) => list.slice().sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
 
 /* ---------- Rendering ---------- */
@@ -116,16 +136,19 @@ function renderDashboard() {
 
   // budget
   const box = $('#budgetBox');
-  if (state.budget > 0) {
+  const catTotal = catBudgetTotal(monthKey(viewMonth));
+  const budget = state.budget > 0 ? state.budget : catTotal;
+  if (budget > 0) {
     box.hidden = false;
-    const pct = Math.min(100, (total / state.budget) * 100);
+    const pct = Math.min(100, (total / budget) * 100);
     const fill = $('#budgetFill');
     fill.style.width = pct + '%';
-    fill.classList.toggle('over', total > state.budget);
-    const left = state.budget - total;
+    fill.classList.toggle('over', total > budget);
+    const left = budget - total;
+    const what = state.budget > 0 ? 'budget' : 'category budgets';
     $('#budgetText').textContent = left >= 0
-      ? `${money(left)} left of ${money(state.budget)} budget`
-      : `${money(-left)} over your ${money(state.budget)} budget`;
+      ? `${money(left)} left of ${money(budget)} ${what}`
+      : `${money(-left)} over your ${money(budget)} ${what}`;
   } else {
     box.hidden = false;
     $('#budgetFill').style.width = '0';
@@ -160,7 +183,12 @@ function renderDashboard() {
   // categories
   const byCat = {};
   list.forEach((t) => { byCat[t.category] = (byCat[t.category] || 0) + t.amount; });
-  const rows = Object.entries(byCat).map(([id, sum]) => ({ c: catById(id), sum })).sort((a, b) => b.sum - a.sum);
+  const mk = monthKey(viewMonth);
+  const rows = Object.entries(byCat).map(([id, sum]) => ({ c: catById(id), sum, budget: catBudget(id, mk) }))
+    .sort((a, b) => b.sum - a.sum);
+  // Budgeted categories with no spending yet still get a row in the breakdown.
+  const unspent = state.categories.filter((c) => !byCat[c.id] && catBudget(c.id, mk) > 0)
+    .map((c) => ({ c, sum: 0, budget: catBudget(c.id, mk) }));
   const donut = $('#donut');
   const R = 15.9155; // circumference = 100
   let offset = 0;
@@ -173,11 +201,18 @@ function renderDashboard() {
       return seg;
     }).join('');
   $('#donutTop').textContent = rows.length ? `${rows[0].c.emoji} ${rows[0].c.name}` : 'No data';
-  $('#catBreakdown').innerHTML = rows.length ? rows.map((r) => {
-    const pct = Math.round((r.sum / total) * 100);
+  const allRows = rows.concat(unspent);
+  $('#catBreakdown').innerHTML = allRows.length ? allRows.map((r) => {
+    const pct = total ? Math.round((r.sum / total) * 100) : 0;
+    const level = budgetLevel(r.sum, r.budget);
+    const width = r.budget ? Math.min(100, (r.sum / r.budget) * 100) : pct;
+    const barColor = level === 'over' ? 'var(--danger)' : level === 'warn' ? 'var(--warn)' : r.c.color;
+    const sub = r.budget
+      ? `<div class="cb-sub ${level}">${r.sum > r.budget ? money(r.sum - r.budget) + ' over' : money(r.budget - r.sum) + ' left'}</div>`
+      : '';
     return `<li>${catDot(r.c)}
-      <div><div class="cb-name">${esc(r.c.name)}</div><div class="cb-track"><div style="width:${pct}%;background:${r.c.color}"></div></div></div>
-      <div class="cb-amt">${money(r.sum)}<small>${pct}%</small></div></li>`;
+      <div><div class="cb-name">${esc(r.c.name)}</div><div class="cb-track"><div style="width:${width}%;background:${barColor}"></div></div>${sub}</div>
+      <div class="cb-amt">${money(r.sum)}<small>${r.budget ? 'of ' + money(r.budget) : pct + '%'}</small></div></li>`;
   }).join('') : '<li class="empty" style="display:block">No expenses this month yet</li>';
 
   // recent
@@ -214,6 +249,13 @@ function renderTransactions() {
 function renderSettings() {
   $('#budgetInput').value = state.budget || '';
   $('#currencySelect').innerHTML = CURRENCIES.map((c) => `<option ${c === state.currency ? 'selected' : ''}>${c}</option>`).join('');
+  const mk = monthKey(viewMonth);
+  $('#catBudgetMonth').textContent = viewMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  $('#catBudgetList').innerHTML = state.categories.map((c) => {
+    const b = catBudget(c.id, mk);
+    return `<li>${catDot(c)}<label class="name" for="cb-${c.id}">${esc(c.name)}</label>
+      <input type="number" inputmode="decimal" min="0" step="any" id="cb-${c.id}" data-cat-budget="${c.id}" value="${b || ''}" placeholder="No limit"></li>`;
+  }).join('');
   $('#catManage').innerHTML = state.categories.map((c) => {
     const count = state.transactions.filter((t) => t.category === c.id).length;
     return `<li>${catDot(c)}<span class="name">${esc(c.name)} <span class="muted">· ${count}</span></span>
@@ -251,6 +293,29 @@ let pickedCat = null;
 function renderPicker() {
   $('#catPicker').innerHTML = state.categories.map((c) =>
     `<button type="button" class="cat-opt ${pickedCat === c.id ? 'active' : ''}" data-pick="${c.id}">${catDot(c)}<span>${esc(c.name)}</span></button>`).join('');
+  renderCatHint();
+}
+// Shows how much of the picked category's budget is left in the expense's month.
+function renderCatHint() {
+  const hint = $('#catHint');
+  const date = $('#txDate').value;
+  if (!pickedCat || !date) { hint.hidden = true; return; }
+  const mk = date.slice(0, 7);
+  const budget = catBudget(pickedCat, mk);
+  if (!budget) { hint.hidden = true; return; }
+  const spent = spentIn(pickedCat, mk, $('#txId').value);
+  const left = budget - spent;
+  const c = catById(pickedCat);
+  hint.hidden = false;
+  hint.className = 'cat-hint ' + budgetLevel(spent, budget);
+  const amt = parseFloat($('#txAmount').value) || 0;
+  const after = left - amt;
+  hint.className = 'cat-hint ' + budgetLevel(spent + amt, budget);
+  let text = left >= 0
+    ? `${c.name}: ${money(left)} left of ${money(budget)} this month`
+    : `${c.name}: already ${money(-left)} over the ${money(budget)} budget this month`;
+  if (amt > 0 && left >= 0) text += after >= 0 ? ` · ${money(after)} after this` : ` · this puts you ${money(-after)} over`;
+  hint.textContent = text;
 }
 function openSheet(tx) {
   $('#currencySymbol').textContent = currencySymbol();
@@ -275,6 +340,8 @@ $('#catPicker').addEventListener('click', (e) => {
   const b = e.target.closest('[data-pick]');
   if (b) { pickedCat = b.dataset.pick; renderPicker(); }
 });
+$('#txDate').addEventListener('change', renderCatHint);
+$('#txAmount').addEventListener('input', renderCatHint);
 $('#txForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const amount = Math.round(parseFloat($('#txAmount').value) * 100) / 100;
@@ -290,6 +357,15 @@ $('#txForm').addEventListener('submit', (e) => {
     toast('Expense added');
   }
   save(); closeSheet(); renderAll();
+  // Warn when this expense takes its category close to or over budget.
+  const mk = data.date.slice(0, 7);
+  const budget = catBudget(data.category, mk);
+  if (budget) {
+    const spent = spentIn(data.category, mk);
+    const name = catById(data.category).name;
+    if (spent > budget) setTimeout(() => toast(`⚠️ ${name} is ${money(spent - budget)} over budget`), 1900);
+    else if (spent >= budget * 0.8) setTimeout(() => toast(`${name}: only ${money(budget - spent)} left this month`), 1900);
+  }
 });
 $('#deleteTx').onclick = () => {
   const id = $('#txId').value;
@@ -309,6 +385,20 @@ $('#filterChips').addEventListener('click', (e) => {
 $('#saveBudget').onclick = () => {
   state.budget = Math.max(0, parseFloat($('#budgetInput').value) || 0);
   save(); renderAll(); toast(state.budget ? 'Budget saved' : 'Budget cleared');
+};
+$('#saveCatBudgets').onclick = () => {
+  const mk = monthKey(viewMonth);
+  let changed = 0;
+  document.querySelectorAll('[data-cat-budget]').forEach((inp) => {
+    const id = inp.dataset.catBudget;
+    const val = Math.max(0, parseFloat(inp.value) || 0);
+    if (val !== catBudget(id, mk)) {
+      (state.catBudgets[mk] = state.catBudgets[mk] || {})[id] = val;
+      changed++;
+    }
+  });
+  if (!changed) { toast('No changes'); return; }
+  save(); renderAll(); toast('Category budgets saved');
 };
 $('#currencySelect').onchange = (e) => {
   state.currency = e.target.value; fmtCache = {};
@@ -332,6 +422,7 @@ $('#catManage').addEventListener('click', (e) => {
   const c = catById(id);
   if (!confirm(used ? `Delete "${c.name}"? Its ${used} expense(s) will move to "Other".` : `Delete "${c.name}"?`)) return;
   state.categories = state.categories.filter((x) => x.id !== id);
+  Object.values(state.catBudgets).forEach((m) => { delete m[id]; });
   if (used) {
     let other = state.categories.find((x) => x.name.toLowerCase() === 'other');
     if (!other) { other = { id: 'other', name: 'Other', emoji: '📦', color: '#64748b' }; state.categories.push(other); }
@@ -352,7 +443,7 @@ $('#exportCsv').onclick = () => {
 };
 $('#clearAll').onclick = () => {
   if (!confirm('Delete ALL expenses and reset categories? This cannot be undone.')) return;
-  state = { transactions: [], categories: DEFAULT_CATEGORIES.slice(), budget: 0, currency: state.currency };
+  state = { transactions: [], categories: DEFAULT_CATEGORIES.slice(), budget: 0, catBudgets: {}, currency: state.currency };
   save(); renderAll(); toast('All data deleted');
 };
 
