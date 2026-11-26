@@ -212,3 +212,27 @@ label.btn { display: inline-block; }
 .imp-detail { font-size: 11px; color: var(--muted); margin-top: 2px; word-break: break-all; }
 #importToggleAll { padding: 0; margin: -4px 0 4px; align-self: flex-start; }
 #importToggleAll[hidden] { display: none; }
+
+/* Subcategories */
+.chip.small { padding: 5px 10px; font-size: 12px; }
+.sub-chips-row { padding-top: 6px; }
+.sub-chips-row[hidden] { display: none; }
+.sub-picker { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sub-picker:empty { display: none; }
+.sub-label { font-size: 12px; color: var(--muted); font-weight: 600; margin-right: 2px; }
+.ghost-chip { border-style: dashed; color: var(--primary); }
+.cat-breakdown li.can-open { cursor: pointer; }
+.chev { color: var(--muted); font-size: 12px; margin-left: 6px; }
+.cat-breakdown li.sub-row { border-top: 0; padding: 4px 0 6px; }
+.cat-breakdown li.sub-row .cb-name { font-size: 13px; }
+.cat-breakdown li.sub-row .cb-amt { font-size: 13px; font-weight: 500; }
+.cat-manage .sub-toggle { display: block; font-size: 12px; padding: 2px 0 0; font-weight: 500; }
+.cat-manage li.sub-manage { display: block; border-top: 0; padding: 0 0 10px 38px; }
+.sub-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.sub-chips .chip { display: inline-flex; align-items: center; gap: 2px; cursor: default; }
+.sub-chips .chip button { border: 0; background: none; color: var(--muted); font-size: 12px; padding: 0 0 0 4px; cursor: pointer; }
+.sub-manage input { padding: 8px 10px; }
+.sub-manage .btn { padding: 8px 14px; }
+.imp-selects { display: flex; flex-wrap: wrap; gap: 6px; }
+.imp-selects select[hidden] { display: none; }
+.cat-manage .sub-manage .btn { background: var(--primary); color: #fff; font-size: 14px; border-radius: 12px; padding: 8px 14px; }

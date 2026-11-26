@@ -81,6 +81,7 @@
         <div class="filters">
           <input type="search" id="search" placeholder="Search notes…" aria-label="Search">
           <div class="chips" id="filterChips"></div>
+          <div class="chips sub-chips-row" id="subChips" hidden></div>
         </div>
         <div id="txGroups"></div>
       </section>
@@ -204,6 +205,7 @@
         <input type="number" inputmode="decimal" step="any" min="0.01" id="txAmount" placeholder="0" required>
       </label>
       <div class="cat-picker" id="catPicker"></div>
+      <div class="sub-picker" id="subPicker"></div>
       <div class="cat-hint" id="catHint" hidden></div>
       <div class="field-row">
         <input type="date" id="txDate" required aria-label="Date">

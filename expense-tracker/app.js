@@ -2,7 +2,7 @@
 
 /* ---------- Storage ---------- */
 const STORE_KEY = 'spendly.v1';
-const APP_VERSION = 6; // keep in step with VERSION in sw.js
+const APP_VERSION = 7; // keep in step with VERSION in sw.js
 
 const DEFAULT_CATEGORIES = [
   { id: 'food', name: 'Food', emoji: '🍔', color: '#f97316' },
@@ -15,6 +15,21 @@ const DEFAULT_CATEGORIES = [
   { id: 'other', name: 'Other', emoji: '📦', color: '#64748b' },
 ];
 
+// Starter subcategories for the built-in categories (users can add, remove or ignore them).
+const DEFAULT_SUBS = {
+  food: ['Restaurants', 'Food delivery', 'Tea & snacks'],
+  groceries: ['Supermarket', 'Fruits & vegetables', 'Milk & dairy'],
+  transport: ['Cab & auto', 'Fuel', 'Metro & bus', 'Train & flights'],
+  shopping: ['Clothes', 'Electronics', 'Home'],
+  bills: ['Mobile & internet', 'Electricity', 'Rent', 'Insurance'],
+  health: ['Medicines', 'Doctor', 'Fitness'],
+  fun: ['Movies', 'Subscriptions', 'Outings'],
+};
+const slug = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24);
+const defaultSubs = (catId) => (DEFAULT_SUBS[catId] || []).map((name) => ({ id: `${catId}-${slug(name)}`, name }));
+// A fresh copy each time, so editing a category never changes the built-in defaults.
+const defaultCategories = () => DEFAULT_CATEGORIES.map((c) => ({ ...c, subs: defaultSubs(c.id) }));
+
 const CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'AUD', 'CAD', 'JPY'];
 
 function guessCurrency() {
@@ -25,8 +40,8 @@ function guessCurrency() {
 }
 
 const DEFAULT_STATE = () => ({
-  transactions: [], categories: DEFAULT_CATEGORIES.slice(), budget: 0, catBudgets: {},
-  merchantMap: {}, importedKeys: [], dismissedKeys: [], lastImportAt: 0, lastBackupAt: 0, currency: guessCurrency(),
+  transactions: [], categories: defaultCategories(), budget: 0, catBudgets: {},
+  merchantMap: {}, merchantSub: {}, importedKeys: [], dismissedKeys: [], lastImportAt: 0, lastBackupAt: 0, currency: guessCurrency(),
 });
 
 /* Cleans stored or restored data so a damaged or hand-edited file can't break the app. */
@@ -37,14 +52,20 @@ function normalize(s) {
   const categories = Array.isArray(s.categories) ? s.categories.filter((c) => c && safeId(c.id) && c.name).map((c) => ({
     id: c.id, name: String(c.name).slice(0, 40), emoji: String(c.emoji || '🏷️').slice(0, 4),
     color: /^#[0-9a-f]{6}$/i.test(c.color) ? c.color : '#64748b',
+    // Categories saved before subcategories existed get the starter list once.
+    subs: Array.isArray(c.subs)
+      ? c.subs.filter((x) => x && safeId(x.id) && x.name).slice(0, 40).map((x) => ({ id: x.id, name: String(x.name).slice(0, 30) }))
+      : defaultSubs(c.id),
   })) : [];
   const cats = categories.length ? categories : base.categories;
   const catIds = new Set(cats.map((c) => c.id));
+  const subOk = (catId, subId) => safeId(subId) && cats.some((c) => c.id === catId && c.subs.some((x) => x.id === subId));
   const transactions = Array.isArray(s.transactions) ? s.transactions.filter((t) =>
     t && safeId(t.id) && Number(t.amount) > 0 && /^\d{4}-\d{2}-\d{2}$/.test(t.date)).map((t) => ({
     id: t.id, createdAt: Number(t.createdAt) || 0, amount: Math.round(Number(t.amount) * 100) / 100,
     category: catIds.has(t.category) ? t.category : (catIds.has('other') ? 'other' : cats[0].id),
     date: t.date, note: String(t.note || '').slice(0, 80), ...(t.smsRef ? { smsRef: String(t.smsRef).slice(0, 30) } : {}),
+    ...(subOk(t.category, t.sub) ? { sub: t.sub } : {}),
   })) : [];
   return {
     transactions,
@@ -52,6 +73,7 @@ function normalize(s) {
     budget: Math.max(0, Number(s.budget) || 0),
     catBudgets: s.catBudgets && typeof s.catBudgets === 'object' ? s.catBudgets : {},
     merchantMap: s.merchantMap && typeof s.merchantMap === 'object' ? s.merchantMap : {},
+    merchantSub: s.merchantSub && typeof s.merchantSub === 'object' ? s.merchantSub : {},
     importedKeys: Array.isArray(s.importedKeys) ? s.importedKeys.filter((k) => typeof k === 'string' && /^[a-z0-9]{1,40}$/i.test(k)).slice(-10000) : [],
     dismissedKeys: Array.isArray(s.dismissedKeys) ? s.dismissedKeys.filter((k) => typeof k === 'string' && /^[a-z0-9]{1,40}$/i.test(k)).slice(-10000) : [],
     lastImportAt: Number(s.lastImportAt) || 0,
@@ -104,6 +126,16 @@ function currencySymbol() {
 const catById = (id) => state.categories.find((c) => c.id === id)
   || { id, name: 'Uncategorised', emoji: '❔', color: '#94a3b8' };
 
+const subOf = (catId, subId) => subId ? (catById(catId).subs || []).find((x) => x.id === subId) : null;
+const catLabel = (t) => { const c = catById(t.category), x = subOf(t.category, t.sub); return x ? `${c.name} › ${x.name}` : c.name; };
+// Subcategory remembered for a payee, if it still belongs to the given category.
+const learnedSub = (merchant, catId) => {
+  const id = merchant ? state.merchantSub[merchant.toLowerCase()] : '';
+  return subOf(catId, id) ? id : '';
+};
+const subOptions = (catId, sel) => `<option value="">No subcategory</option>` + (catById(catId).subs || [])
+  .map((x) => `<option value="${x.id}" ${x.id === sel ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+
 function catDot(c) {
   return `<span class="cat-dot" style="background:${c.color}22;color:${c.color}">${esc(c.emoji)}</span>`;
 }
@@ -121,6 +153,9 @@ function toast(msg) {
 const now = new Date();
 let viewMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 let filterCat = 'all';
+let filterSub = 'all';
+let expandedCat = null;   // dashboard: category showing its subcategory split
+let managedCat = null;    // categories tab: category whose subcategories are being edited
 let searchText = '';
 
 const monthKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
@@ -152,7 +187,7 @@ function txItem(t) {
   const d = parseISO(t.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   return `<li class="tx" data-id="${t.id}">
     ${catDot(c)}
-    <div><div class="tx-title">${esc(t.note || c.name)}</div><div class="tx-sub">${esc(c.name)} · ${d}</div></div>
+    <div><div class="tx-title">${esc(t.note || catLabel(t))}</div><div class="tx-sub">${esc(catLabel(t))} · ${d}</div></div>
     <div class="tx-amt">${money(t.amount)}</div>
   </li>`;
 }
@@ -238,9 +273,23 @@ function renderDashboard() {
     const sub = r.budget
       ? `<div class="cb-sub ${level}">${r.sum > r.budget ? money(r.sum - r.budget) + ' over' : money(r.budget - r.sum) + ' left'}</div>`
       : '';
-    return `<li>${catDot(r.c)}
-      <div><div class="cb-name">${esc(r.c.name)}</div><div class="cb-track"><div style="width:${width}%;background:${barColor}"></div></div>${sub}</div>
-      <div class="cb-amt">${money(r.sum)}<small>${r.budget ? 'of ' + money(r.budget) : pct + '%'}</small></div></li>`;
+    const catTx = list.filter((t) => t.category === r.c.id);
+    const canOpen = catTx.some((t) => t.sub);
+    const open = canOpen && expandedCat === r.c.id;
+    let subRows = '';
+    if (open) {
+      const bySub = {};
+      catTx.forEach((t) => { const k = subOf(t.category, t.sub) ? t.sub : ''; bySub[k] = (bySub[k] || 0) + t.amount; });
+      subRows = Object.entries(bySub).sort((a, b) => b[1] - a[1]).map(([k, v]) => {
+        const x = subOf(r.c.id, k);
+        return `<li class="sub-row"><span></span><div><div class="cb-name">${x ? esc(x.name) : '<span class="muted">No subcategory</span>'}</div>
+          <div class="cb-track"><div style="width:${Math.round((v / r.sum) * 100)}%;background:${r.c.color}99"></div></div></div>
+          <div class="cb-amt">${money(v)}<small>${Math.round((v / r.sum) * 100)}%</small></div></li>`;
+      }).join('');
+    }
+    return `<li class="${canOpen ? 'can-open' : ''}" ${canOpen ? `data-expand="${r.c.id}"` : ''}>${catDot(r.c)}
+      <div><div class="cb-name">${esc(r.c.name)}${canOpen ? `<span class="chev">${open ? '▾' : '▸'}</span>` : ''}</div><div class="cb-track"><div style="width:${width}%;background:${barColor}"></div></div>${sub}</div>
+      <div class="cb-amt">${money(r.sum)}<small>${r.budget ? 'of ' + money(r.budget) : pct + '%'}</small></div></li>${subRows}`;
   }).join('') : '<li class="empty" style="display:block">No expenses this month yet</li>';
 
   // backup reminder: data lives only on this phone
@@ -259,10 +308,17 @@ function renderTransactions() {
   $('#filterChips').innerHTML = [{ id: 'all', name: 'All', emoji: '' }, ...state.categories]
     .map((c) => `<button class="chip ${filterCat === c.id ? 'active' : ''}" data-cat="${c.id}">${esc(c.emoji)} ${esc(c.name)}</button>`).join('');
 
+  const subs = filterCat === 'all' ? [] : (catById(filterCat).subs || []);
+  if (filterSub !== 'none' && !subs.some((x) => x.id === filterSub)) filterSub = 'all';
+  $('#subChips').hidden = !subs.length;
+  $('#subChips').innerHTML = subs.length ? [{ id: 'all', name: 'All ' + catById(filterCat).name }, ...subs, { id: 'none', name: 'No subcategory' }]
+    .map((x) => `<button class="chip small ${filterSub === x.id ? 'active' : ''}" data-sub="${x.id}">${esc(x.name)}</button>`).join('') : '';
+
   const q = searchText.trim().toLowerCase();
   const list = sortTx(monthTx()).filter((t) =>
     (filterCat === 'all' || t.category === filterCat) &&
-    (!q || (t.note || '').toLowerCase().includes(q) || catById(t.category).name.toLowerCase().includes(q)));
+    (filterSub === 'all' || (filterSub === 'none' ? !subOf(t.category, t.sub) : t.sub === filterSub)) &&
+    (!q || (t.note || '').toLowerCase().includes(q) || catLabel(t).toLowerCase().includes(q)));
 
   if (!list.length) {
     $('#txGroups').innerHTML = '<div class="card empty">No transactions found for this month</div>';
@@ -299,8 +355,16 @@ function renderSettings() {
   }).join('');
   $('#catManage').innerHTML = state.categories.map((c) => {
     const count = state.transactions.filter((t) => t.category === c.id).length;
-    return `<li>${catDot(c)}<span class="name">${esc(c.name)} <span class="muted">· ${count}</span></span>
-      <button data-del-cat="${c.id}" aria-label="Delete ${esc(c.name)}">✕</button></li>`;
+    const open = managedCat === c.id;
+    const n = c.subs.length;
+    return `<li class="cat-row">${catDot(c)}<span class="name">${esc(c.name)} <span class="muted">· ${count}</span>
+        <button type="button" class="link sub-toggle" data-manage="${c.id}">${open ? '▾' : '▸'} ${n} subcategor${n === 1 ? 'y' : 'ies'}</button></span>
+      <button data-del-cat="${c.id}" aria-label="Delete ${esc(c.name)}">✕</button></li>
+      ${open ? `<li class="sub-manage">
+        <div class="sub-chips">${c.subs.map((x) => `<span class="chip small">${esc(x.name)}<button type="button" data-del-sub="${c.id}|${x.id}" aria-label="Remove ${esc(x.name)}">✕</button></span>`).join('') || '<span class="muted">No subcategories yet</span>'}</div>
+        <div class="field-row"><input type="text" maxlength="30" placeholder="New subcategory for ${esc(c.name)}" data-sub-input="${c.id}">
+          <button type="button" class="btn" data-add-sub="${c.id}">Add</button></div>
+      </li>` : ''}`;
   }).join('');
 }
 
@@ -331,10 +395,20 @@ $('#nextMonth').onclick = () => { viewMonth.setMonth(viewMonth.getMonth() + 1); 
 
 /* ---------- Add / edit sheet ---------- */
 let pickedCat = null;
+let pickedSub = '';
 function renderPicker() {
   $('#catPicker').innerHTML = state.categories.map((c) =>
     `<button type="button" class="cat-opt ${pickedCat === c.id ? 'active' : ''}" data-pick="${c.id}">${catDot(c)}<span>${esc(c.name)}</span></button>`).join('');
+  renderSubPicker();
   renderCatHint();
+}
+function renderSubPicker() {
+  const c = pickedCat ? catById(pickedCat) : null;
+  if (!c) { $('#subPicker').innerHTML = ''; return; }
+  if (!subOf(pickedCat, pickedSub)) pickedSub = '';
+  $('#subPicker').innerHTML = `<span class="sub-label">${esc(c.name)} ›</span>` +
+    (c.subs || []).map((x) => `<button type="button" class="chip small ${pickedSub === x.id ? 'active' : ''}" data-pick-sub="${x.id}">${esc(x.name)}</button>`).join('') +
+    `<button type="button" class="chip small ghost-chip" data-new-sub>＋ New</button>`;
 }
 // Shows how much of the picked category's budget is left in the expense's month.
 function renderCatHint() {
@@ -368,6 +442,7 @@ function openSheet(tx) {
   $('#txNote').value = tx ? tx.note || '' : '';
   $('#deleteTx').hidden = !tx;
   pickedCat = tx ? tx.category : (state.categories[0] && state.categories[0].id);
+  pickedSub = tx && tx.sub ? tx.sub : '';
   pendingSms = null;
   $('#smsBox').hidden = !!tx;
   $('#smsText').hidden = true; $('#smsText').value = '';
@@ -380,6 +455,11 @@ function closeSheet() { $('#sheetBackdrop').hidden = true; }
 
 /* ---------- Bank SMS import ---------- */
 let pendingSms = null;
+function rememberPayee(merchant, catId, subId) {
+  const k = merchant.toLowerCase();
+  state.merchantMap[k] = catId;
+  if (subId) state.merchantSub[k] = subId; else delete state.merchantSub[k];
+}
 const fmtDay = (iso) => parseISO(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 
 function smsInfo(msg, level) {
@@ -414,6 +494,7 @@ function applySms(text) {
   $('#txDate').value = date;
   $('#txNote').value = r.merchant;
   pickedCat = SpendlySMS.guessCategory(r.merchant, text, state.categories.map((c) => c.id), state.merchantMap);
+  pickedSub = learnedSub(r.merchant, pickedCat);
   pendingSms = { ref: r.ref, merchant: r.merchant };
   renderPicker();
   const dup = state.transactions.find((t) => (r.ref && t.smsRef === r.ref) ||
@@ -461,7 +542,16 @@ $('#cancelTx').onclick = closeSheet;
 $('#sheetBackdrop').addEventListener('click', (e) => { if (e.target.id === 'sheetBackdrop') closeSheet(); });
 $('#catPicker').addEventListener('click', (e) => {
   const b = e.target.closest('[data-pick]');
-  if (b) { pickedCat = b.dataset.pick; renderPicker(); }
+  if (b) { if (pickedCat !== b.dataset.pick) pickedSub = ''; pickedCat = b.dataset.pick; renderPicker(); }
+});
+$('#subPicker').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-pick-sub]');
+  if (b) { pickedSub = pickedSub === b.dataset.pickSub ? '' : b.dataset.pickSub; renderSubPicker(); return; }
+  if (e.target.closest('[data-new-sub]')) {
+    const name = prompt(`New subcategory for ${catById(pickedCat).name}:`);
+    const sub = addSub(pickedCat, name);
+    if (sub) { pickedSub = sub.id; save(); renderSubPicker(); renderSettings(); }
+  }
 });
 $('#txDate').addEventListener('change', renderCatHint);
 $('#txAmount').addEventListener('input', renderCatHint);
@@ -472,15 +562,18 @@ $('#txForm').addEventListener('submit', (e) => {
   if (!pickedCat) { toast('Pick a category'); return; }
   const id = $('#txId').value;
   const data = { amount, category: pickedCat, date: $('#txDate').value, note: $('#txNote').value.trim() };
+  const sub = subOf(pickedCat, pickedSub) ? pickedSub : '';
   if (id) {
-    Object.assign(state.transactions.find((t) => t.id === id), data);
+    const t = state.transactions.find((x) => x.id === id);
+    Object.assign(t, data);
+    if (sub) t.sub = sub; else delete t.sub;
     toast('Expense updated');
   } else {
-    const tx = { id: uid(), createdAt: Date.now(), ...data };
+    const tx = { id: uid(), createdAt: Date.now(), ...data, ...(sub ? { sub } : {}) };
     if (pendingSms) {
       if (pendingSms.ref) tx.smsRef = pendingSms.ref;
       // Remember the category chosen for this payee so next time it's picked automatically.
-      if (pendingSms.merchant) state.merchantMap[pendingSms.merchant.toLowerCase()] = data.category;
+      if (pendingSms.merchant) rememberPayee(pendingSms.merchant, data.category, sub);
     }
     state.transactions.push(tx);
     toast('Expense added');
@@ -507,7 +600,17 @@ $('#deleteTx').onclick = () => {
 $('#search').addEventListener('input', (e) => { searchText = e.target.value; renderTransactions(); });
 $('#filterChips').addEventListener('click', (e) => {
   const b = e.target.closest('[data-cat]');
-  if (b) { filterCat = b.dataset.cat; renderTransactions(); }
+  if (b) { filterCat = b.dataset.cat; filterSub = 'all'; renderTransactions(); }
+});
+$('#subChips').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-sub]');
+  if (b) { filterSub = b.dataset.sub; renderTransactions(); }
+});
+$('#catBreakdown').addEventListener('click', (e) => {
+  const li = e.target.closest('[data-expand]');
+  if (!li) return;
+  expandedCat = expandedCat === li.dataset.expand ? null : li.dataset.expand;
+  renderDashboard();
 });
 
 /* ---------- Settings ---------- */
@@ -538,11 +641,46 @@ $('#addCatForm').addEventListener('submit', (e) => {
   const name = $('#newCatName').value.trim();
   if (!name) return;
   if (state.categories.some((c) => c.name.toLowerCase() === name.toLowerCase())) { toast('Category already exists'); return; }
-  state.categories.push({ id: uid(), name, emoji: $('#newCatEmoji').value.trim() || '🏷️', color: $('#newCatColor').value });
+  state.categories.push({ id: uid(), name, emoji: $('#newCatEmoji').value.trim() || '🏷️', color: $('#newCatColor').value, subs: [] });
   $('#newCatName').value = ''; $('#newCatEmoji').value = '';
   save(); renderAll(); toast('Category added');
 });
+function addSub(catId, name) {
+  const c = state.categories.find((x) => x.id === catId);
+  name = (name || '').trim().slice(0, 30);
+  if (!c || !name) return null;
+  const existing = c.subs.find((x) => x.name.toLowerCase() === name.toLowerCase());
+  if (existing) { toast('That subcategory already exists'); return existing; }
+  const sub = { id: uid(), name };
+  c.subs.push(sub);
+  return sub;
+}
+$('#catManage').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.dataset.subInput) { e.preventDefault(); $(`[data-add-sub="${e.target.dataset.subInput}"]`).click(); }
+});
 $('#catManage').addEventListener('click', (e) => {
+  const m = e.target.closest('[data-manage]');
+  if (m) { managedCat = managedCat === m.dataset.manage ? null : m.dataset.manage; renderSettings(); return; }
+  const add = e.target.closest('[data-add-sub]');
+  if (add) {
+    const catId = add.dataset.addSub;
+    const input = $(`[data-sub-input="${catId}"]`);
+    if (addSub(catId, input.value)) { save(); renderAll(); toast('Subcategory added'); const again = $(`[data-sub-input="${catId}"]`); if (again) again.focus(); }
+    return;
+  }
+  const del = e.target.closest('[data-del-sub]');
+  if (del) {
+    const [catId, subId] = del.dataset.delSub.split('|');
+    const c = state.categories.find((x) => x.id === catId);
+    const x = c && c.subs.find((y) => y.id === subId);
+    if (!x) return;
+    const used = state.transactions.filter((t) => t.category === catId && t.sub === subId).length;
+    if (!confirm(used ? `Remove "${x.name}"? Its ${used} expense(s) stay in ${c.name} without a subcategory.` : `Remove "${x.name}"?`)) return;
+    c.subs = c.subs.filter((y) => y.id !== subId);
+    state.transactions.forEach((t) => { if (t.category === catId && t.sub === subId) delete t.sub; });
+    save(); renderAll();
+    return;
+  }
   const b = e.target.closest('[data-del-cat]');
   if (!b) return;
   const id = b.dataset.delCat;
@@ -554,15 +692,15 @@ $('#catManage').addEventListener('click', (e) => {
   Object.values(state.catBudgets).forEach((m) => { delete m[id]; });
   if (used) {
     let other = state.categories.find((x) => x.name.toLowerCase() === 'other');
-    if (!other) { other = { id: 'other', name: 'Other', emoji: '📦', color: '#64748b' }; state.categories.push(other); }
-    state.transactions.forEach((t) => { if (t.category === id) t.category = other.id; });
+    if (!other) { other = { id: 'other', name: 'Other', emoji: '📦', color: '#64748b', subs: [] }; state.categories.push(other); }
+    state.transactions.forEach((t) => { if (t.category === id) { t.category = other.id; delete t.sub; } });
   }
   if (filterCat === id) filterCat = 'all';
   save(); renderAll();
 });
 $('#exportCsv').onclick = () => {
-  const rows = [['Date', 'Category', 'Amount', 'Currency', 'Note']].concat(
-    sortTx(state.transactions).map((t) => [t.date, catById(t.category).name, t.amount, state.currency, t.note || '']));
+  const rows = [['Date', 'Category', 'Subcategory', 'Amount', 'Currency', 'Note']].concat(
+    sortTx(state.transactions).map((t) => [t.date, catById(t.category).name, (subOf(t.category, t.sub) || {}).name || '', t.amount, state.currency, t.note || '']));
   const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
@@ -626,13 +764,15 @@ function showReview(title, summary) {
   const opts = (sel) => state.categories.map((c) => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.emoji)} ${esc(c.name)}</option>`).join('');
   $('#importList').innerHTML = shown.length ? shown.map((it) => {
     const i = importItems.indexOf(it);
+    if (it.sub === undefined) it.sub = learnedSub(it.merchant, it.category);
     return `<li class="imp ${it.already ? 'dim' : ''}" data-i="${i}">
       <input type="checkbox" ${it.checked ? 'checked' : ''} aria-label="Add this expense">
       <div class="imp-main">
         <div class="tx-title">${esc(it.merchant || 'Unknown payee')}</div>
         <div class="tx-sub">${fmtDay(it.date)}${it.already ? ' · <b>' + (it.alreadyText || 'already added') + '</b>' : ''}</div>
         ${it.detail ? `<div class="imp-detail">${esc(it.detail)}</div>` : ''}
-        <select aria-label="Category">${opts(it.category)}</select>
+        <div class="imp-selects"><select aria-label="Category" data-role="cat">${opts(it.category)}</select>
+        <select aria-label="Subcategory" data-role="sub" ${(catById(it.category).subs || []).length ? '' : 'hidden'}>${subOptions(it.category, it.sub)}</select></div>
       </div>
       <div class="tx-amt">${money(it.amount)}</div>
     </li>`;
@@ -657,7 +797,14 @@ $('#importList').addEventListener('change', (e) => {
   if (!li) return;
   const it = importItems[+li.dataset.i];
   if (e.target.type === 'checkbox') it.checked = e.target.checked;
-  if (e.target.tagName === 'SELECT') it.category = e.target.value;
+  if (e.target.dataset.role === 'cat') {
+    it.category = e.target.value;
+    it.sub = learnedSub(it.merchant, it.category);
+    const subSel = li.querySelector('[data-role=sub]');
+    subSel.innerHTML = subOptions(it.category, it.sub);
+    subSel.hidden = !(catById(it.category).subs || []).length;
+  }
+  if (e.target.dataset.role === 'sub') it.sub = e.target.value;
   updateImportButton();
 });
 const closeImport = () => { $('#importBackdrop').hidden = true; importItems = []; };
@@ -667,9 +814,10 @@ $('#importConfirm').onclick = () => {
   let added = 0;
   for (const it of importItems) {
     if (it.skip || !it.checked) continue;
+    const sub = subOf(it.category, it.sub) ? it.sub : '';
     state.transactions.push({ id: uid(), createdAt: Date.now() + added, amount: it.amount, category: it.category,
-      date: it.date, note: it.merchant, ...(it.ref ? { smsRef: it.ref } : {}) });
-    if (it.merchant) state.merchantMap[it.merchant.toLowerCase()] = it.category;
+      date: it.date, note: it.merchant, ...(it.ref ? { smsRef: it.ref } : {}), ...(sub ? { sub } : {}) });
+    if (it.merchant) rememberPayee(it.merchant, it.category, sub);
     added++;
   }
   // Added items, non-expenses and exact duplicates are done with. Anything else left unticked is
