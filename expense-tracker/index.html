@@ -30,13 +30,26 @@
     <main>
       <!-- DASHBOARD -->
       <section class="screen active" id="screen-dashboard">
-        <div class="hero card">
+        <div class="seg" id="dashSwitch" role="tablist">
+          <button class="active" data-dash="overview" role="tab">Overview</button>
+          <button data-dash="trends" role="tab">Trends</button>
+          <button data-dash="payees" role="tab">Payees</button>
+        </div>
+
+        <div class="dash" id="dash-overview">
+        <button class="alert-banner" id="budgetAlert" hidden></button>
+
+        <div class="hero card" id="heroCard">
           <div class="hero-label">Spent this month</div>
           <div class="hero-amount" id="monthTotal">0</div>
           <div class="budget" id="budgetBox">
             <div class="bar"><div class="bar-fill" id="budgetFill"></div></div>
             <div class="budget-text" id="budgetText"></div>
           </div>
+        </div>
+
+        <div class="ticker" id="ticker" hidden aria-live="off">
+          <div class="ticker-track" id="tickerTrack"></div>
         </div>
 
         <div class="sms-row">
@@ -74,6 +87,38 @@
           <div class="row-between"><h2>Recent</h2><button class="link" data-goto="transactions">See all</button></div>
           <ul class="tx-list" id="recentList"></ul>
         </div>
+        </div>
+
+        <!-- TRENDS -->
+        <div class="dash" id="dash-trends" hidden>
+          <div class="card">
+            <div class="row-between"><h2 id="trendTitle">Last 6 months</h2><span class="muted" id="trendAvg"></span></div>
+            <div class="chips" id="trendChips"></div>
+            <div class="month-chart" id="trendChart"></div>
+            <p class="muted small">Tap a month to open it in Overview.</p>
+          </div>
+          <div class="card">
+            <h2>Average per month, by category</h2>
+            <p class="muted small" id="avgNote"></p>
+            <ul class="avg-list" id="avgList"></ul>
+          </div>
+        </div>
+
+        <!-- PAYEES -->
+        <div class="dash" id="dash-payees" hidden>
+          <div class="card">
+            <div class="row-between">
+              <h2 id="payeeTitle">Top payees</h2>
+              <div class="seg small" id="payeeRange">
+                <button class="active" data-range="month">Month</button>
+                <button data-range="year">Year</button>
+              </div>
+            </div>
+            <p class="muted small" id="payeeSummary"></p>
+            <ul class="payee-list" id="payeeList"></ul>
+            <p class="muted small">Payees come from each expense's note. Tap one to see its expenses.</p>
+          </div>
+        </div>
       </section>
 
       <!-- TRANSACTIONS -->
@@ -96,7 +141,7 @@
             <button class="btn" id="saveBudget">Save</button>
           </div>
         </div>
-        <div class="card">
+        <div class="card" id="catBudgetCard">
           <h2>Category budgets · <span id="catBudgetMonth"></span></h2>
           <p class="muted hint-top">Applies to this month and every month after, until you change it. Use ‹ › at the top to set a different amount for another month.</p>
           <ul class="cat-manage cat-budgets" id="catBudgetList"></ul>
