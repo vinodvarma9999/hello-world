@@ -21,7 +21,7 @@ No sign-up, no server: your data stays on your device and it works offline.
 ## Put it on your phone
 
 1. Host it (one-time): on GitHub, open **Settings → Pages**, set **Source** to **GitHub Actions**.
-   Once this folder is on `main`, the workflow `.github/workflows/deploy-pages.yml` publishes it to
+   Once this folder is on `master` (the default branch), the workflow `.github/workflows/deploy-pages.yml` publishes it to
    `https://<your-username>.github.io/<repo-name>/` (you can also run it from the **Actions** tab).
 2. Open that link on your phone:
    - **Android (Chrome)**: tap **⋮ → Add to Home screen / Install app**.

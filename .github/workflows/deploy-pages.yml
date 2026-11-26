@@ -2,7 +2,7 @@ name: Deploy Spendly to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths: ['expense-tracker/**', '.github/workflows/deploy-pages.yml']
   workflow_dispatch:
 
