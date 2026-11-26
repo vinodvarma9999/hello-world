@@ -2,6 +2,7 @@
 
 /* ---------- Storage ---------- */
 const STORE_KEY = 'spendly.v1';
+const APP_VERSION = 4; // keep in step with VERSION in sw.js
 
 const DEFAULT_CATEGORIES = [
   { id: 'food', name: 'Food', emoji: '🍔', color: '#f97316' },
@@ -279,6 +280,7 @@ function renderTransactions() {
 function renderSettings() {
   $('#budgetInput').value = state.budget || '';
   $('#currencySelect').innerHTML = CURRENCIES.map((c) => `<option ${c === state.currency ? 'selected' : ''}>${c}</option>`).join('');
+  $('#appVersion').textContent = `Spendly version ${APP_VERSION}`;
   $('#lastBackup').textContent = state.lastBackupAt
     ? 'Last backup: ' + new Date(state.lastBackupAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
     : 'Last backup: never';
@@ -617,5 +619,20 @@ $('#clearAll').onclick = () => {
 /* ---------- Boot ---------- */
 renderAll();
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  window.addEventListener('load', async () => {
+    try {
+      // updateViaCache 'none': always fetch sw.js fresh so new versions are noticed.
+      const reg = await navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' });
+      // iPhone resumes home-screen apps instead of reloading them, so check on every return.
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+    } catch (e) { /* offline or unsupported */ }
+  });
+  // When a new version takes over, reload once so the new screens appear.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
 }
