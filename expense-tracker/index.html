@@ -126,6 +126,22 @@
           <p class="muted" id="lastBackup"></p>
         </div>
         <div class="card">
+          <h2>Bank statement</h2>
+          <p class="muted hint-top">Add past expenses (for example from 1 August) from your bank statement. PDF, Excel or CSV. The file is read on this phone and isn't uploaded anywhere.</p>
+          <label class="btn" for="stmtFile" id="stmtLabel">🏦 Import bank statement</label>
+          <input type="file" id="stmtFile" accept=".pdf,.xls,.xlsx,.csv,application/pdf" hidden>
+          <details class="howto">
+            <summary>How to get your ICICI statement</summary>
+            <ol>
+              <li><b>ICICI net banking</b> (website): log in → <b>Bank Accounts</b> → <b>Account Statement</b>. Choose the date range (e.g. 01/08/2026 to today) and download as <b>PDF</b> or <b>XLS</b>.</li>
+              <li><b>iMobile app</b>: open your account → <b>Statement</b> → pick the period → download or email it to yourself.</li>
+              <li>If it arrives by email, open the attachment and tap <b>Share</b> → <b>Save to Files</b>.</li>
+              <li>Here, tap <b>🏦 Import bank statement</b> and choose the file. If it's password-protected, Spendly will ask for the password.</li>
+            </ol>
+            <p class="muted">Menu names can differ slightly between app versions. Payments already in Spendly (from SMS or added by hand) are shown unticked so nothing is counted twice.</p>
+          </details>
+        </div>
+        <div class="card">
           <h2>Bank SMS</h2>
           <p class="muted hint-top">Spendly reads the amount, payee and date on your phone. SMS text isn't saved or sent anywhere.</p>
           <details class="howto" open>
@@ -205,10 +221,11 @@
   <div class="sheet-backdrop" id="importBackdrop" hidden>
     <div class="sheet">
       <div class="sheet-handle"></div>
-      <h2>Import SMS inbox</h2>
+      <h2 id="importTitle">Import SMS inbox</h2>
       <p class="muted" id="importSummary"></p>
+      <button type="button" class="link" id="importToggleAll" hidden>Tick / untick all</button>
       <ul class="import-list" id="importList"></ul>
-      <p class="muted small">Untick anything you don't want. Unticked messages won't be offered again.</p>
+      <p class="muted small">Untick anything you don't want. Unticked items come back unticked next time, so nothing is lost.</p>
       <div class="field-row">
         <button type="button" class="btn ghost" id="importCancel">Cancel</button>
         <button type="button" class="btn grow" id="importConfirm">Add expenses</button>
@@ -218,6 +235,7 @@
 
   <div class="toast" id="toast" role="status"></div>
   <script src="sms.js"></script>
+  <script src="statement.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

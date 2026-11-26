@@ -184,7 +184,7 @@
     return 'h' + h.toString(36) + t.length.toString(36);
   }
 
-  const api = { parseSms, guessCategory, splitInbox, smsKey, parseDate: findDate };
+  const api = { parseSms, guessCategory, splitInbox, smsKey, parseDate: findDate, cleanName };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SpendlySMS = api;
 })(typeof window !== 'undefined' ? window : this);

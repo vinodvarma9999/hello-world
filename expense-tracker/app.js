@@ -2,7 +2,7 @@
 
 /* ---------- Storage ---------- */
 const STORE_KEY = 'spendly.v1';
-const APP_VERSION = 5; // keep in step with VERSION in sw.js
+const APP_VERSION = 6; // keep in step with VERSION in sw.js
 
 const DEFAULT_CATEGORIES = [
   { id: 'food', name: 'Food', emoji: '🍔', color: '#f97316' },
@@ -26,7 +26,7 @@ function guessCurrency() {
 
 const DEFAULT_STATE = () => ({
   transactions: [], categories: DEFAULT_CATEGORIES.slice(), budget: 0, catBudgets: {},
-  merchantMap: {}, importedKeys: [], lastImportAt: 0, lastBackupAt: 0, currency: guessCurrency(),
+  merchantMap: {}, importedKeys: [], dismissedKeys: [], lastImportAt: 0, lastBackupAt: 0, currency: guessCurrency(),
 });
 
 /* Cleans stored or restored data so a damaged or hand-edited file can't break the app. */
@@ -52,7 +52,8 @@ function normalize(s) {
     budget: Math.max(0, Number(s.budget) || 0),
     catBudgets: s.catBudgets && typeof s.catBudgets === 'object' ? s.catBudgets : {},
     merchantMap: s.merchantMap && typeof s.merchantMap === 'object' ? s.merchantMap : {},
-    importedKeys: Array.isArray(s.importedKeys) ? s.importedKeys.filter((k) => typeof k === 'string' && /^[a-z0-9]{1,40}$/i.test(k)).slice(-3000) : [],
+    importedKeys: Array.isArray(s.importedKeys) ? s.importedKeys.filter((k) => typeof k === 'string' && /^[a-z0-9]{1,40}$/i.test(k)).slice(-10000) : [],
+    dismissedKeys: Array.isArray(s.dismissedKeys) ? s.dismissedKeys.filter((k) => typeof k === 'string' && /^[a-z0-9]{1,40}$/i.test(k)).slice(-10000) : [],
     lastImportAt: Number(s.lastImportAt) || 0,
     lastBackupAt: Number(s.lastBackupAt) || 0,
     currency: CURRENCIES.includes(s.currency) ? s.currency : base.currency,
@@ -570,6 +571,7 @@ $('#exportCsv').onclick = () => {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 };
 /* ---------- SMS inbox import ---------- */
+const dismissedSet = () => new Set(state.dismissedKeys);
 // The iPhone Shortcut appends every bank SMS to a text file; this imports them all at once.
 let importItems = [];
 
@@ -598,19 +600,29 @@ function openImport(text) {
     if (!r.ok || r.type === 'credit') { skipped++; importItems.push({ key, skip: true }); continue; }
     const date = r.date || ch.receivedDate || todayISO();
     const merchant = r.merchant;
-    const already = state.transactions.some((t) => (r.ref && t.smsRef === r.ref) ||
+    const dup = state.transactions.some((t) => (r.ref && t.smsRef === r.ref) ||
       (t.amount === r.amount && t.date === date && (t.note || '').toLowerCase() === merchant.toLowerCase()));
+    const dismissed = !dup && dismissedSet().has(key);
+    const already = dup || dismissed;
     importItems.push({
-      key, amount: r.amount, date, merchant, ref: r.ref, already, checked: !already,
+      key, amount: r.amount, date, merchant, ref: r.ref, already, checked: !already, dup,
+      alreadyText: dismissed ? 'skipped last time' : 'already added',
       category: SpendlySMS.guessCategory(merchant, ch.sms, catIds, state.merchantMap),
     });
   }
-  const shown = importItems.filter((i) => !i.skip);
-  const fresh = shown.filter((i) => !i.already).length;
+  const fresh = importItems.filter((i) => !i.skip && !i.already).length;
   const parts = [`${chunks.length} message${chunks.length === 1 ? '' : 's'} in the file`, `${fresh} new expense${fresh === 1 ? '' : 's'}`];
   if (earlier) parts.push(`${earlier} already imported or duplicate`);
   if (skipped) parts.push(`${skipped} skipped (money received, OTPs or not payments)`);
-  $('#importSummary').textContent = parts.join(' · ');
+  showReview('Import SMS inbox', parts.join(' · '));
+}
+
+// Shared review list for SMS inbox and bank statement imports.
+function showReview(title, summary) {
+  $('#importTitle').textContent = title;
+  $('#importSummary').textContent = summary;
+  const shown = importItems.filter((i) => !i.skip);
+  $('#importToggleAll').hidden = shown.length < 6;
   const opts = (sel) => state.categories.map((c) => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.emoji)} ${esc(c.name)}</option>`).join('');
   $('#importList').innerHTML = shown.length ? shown.map((it) => {
     const i = importItems.indexOf(it);
@@ -618,7 +630,8 @@ function openImport(text) {
       <input type="checkbox" ${it.checked ? 'checked' : ''} aria-label="Add this expense">
       <div class="imp-main">
         <div class="tx-title">${esc(it.merchant || 'Unknown payee')}</div>
-        <div class="tx-sub">${fmtDay(it.date)}${it.already ? ' · <b>already added</b>' : ''}</div>
+        <div class="tx-sub">${fmtDay(it.date)}${it.already ? ' · <b>' + (it.alreadyText || 'already added') + '</b>' : ''}</div>
+        ${it.detail ? `<div class="imp-detail">${esc(it.detail)}</div>` : ''}
         <select aria-label="Category">${opts(it.category)}</select>
       </div>
       <div class="tx-amt">${money(it.amount)}</div>
@@ -632,6 +645,13 @@ function updateImportButton() {
   const n = importItems.filter((i) => !i.skip && i.checked).length;
   $('#importConfirm').textContent = n ? `Add ${n} expense${n === 1 ? '' : 's'}` : 'Done';
 }
+$('#importToggleAll').onclick = () => {
+  const shown = importItems.filter((i) => !i.skip);
+  const tick = !shown.every((i) => i.checked);
+  shown.forEach((i) => { i.checked = tick; });
+  document.querySelectorAll('#importList .imp input[type=checkbox]').forEach((cb) => { cb.checked = tick; });
+  updateImportButton();
+};
 $('#importList').addEventListener('change', (e) => {
   const li = e.target.closest('.imp');
   if (!li) return;
@@ -652,12 +672,94 @@ $('#importConfirm').onclick = () => {
     if (it.merchant) state.merchantMap[it.merchant.toLowerCase()] = it.category;
     added++;
   }
-  // Remember every message reviewed (ticked or not) so it isn't offered again.
-  state.importedKeys = state.importedKeys.concat(importItems.map((i) => i.key)).slice(-3000);
+  // Added items, non-expenses and exact duplicates are done with. Anything else left unticked is
+  // remembered as "skipped": it comes back unticked next time, so nothing is ever lost by accident.
+  const done = importItems.filter((i) => i.skip || i.checked || i.dup).map((i) => i.key);
+  const doneSet = new Set(done);
+  const skippedNow = importItems.filter((i) => !doneSet.has(i.key)).map((i) => i.key);
+  state.importedKeys = state.importedKeys.concat(done).slice(-10000);
+  state.dismissedKeys = state.dismissedKeys.filter((k) => !doneSet.has(k)).concat(skippedNow.filter((k) => !dismissedSet().has(k))).slice(-10000);
   state.lastImportAt = Date.now();
   save(); closeImport(); renderAll();
-  toast(added ? `Added ${added} expense${added === 1 ? '' : 's'}` : 'Inbox checked, nothing added');
+  toast(added ? `Added ${added} expense${added === 1 ? '' : 's'}` : 'Checked, nothing added');
 };
+
+/* ---------- Bank statement import (PDF, Excel, CSV) ---------- */
+const loaded = {};
+function loadScript(src) {
+  return loaded[src] || (loaded[src] = new Promise((resolve, reject) => {
+    const el = document.createElement('script');
+    el.src = src; el.onload = resolve;
+    el.onerror = () => { delete loaded[src]; reject(new Error('load')); };
+    document.head.appendChild(el);
+  }));
+}
+
+$('#stmtFile').addEventListener('change', async (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  const isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+  const btn = $('#stmtLabel');
+  btn.textContent = 'Reading statement…';
+  try {
+    const buf = await f.arrayBuffer();
+    let res;
+    if (isPdf) {
+      await loadScript('vendor/pdf.min.js');
+      res = await SpendlyStatement.readPdf(buf, (wrong) => prompt(wrong
+        ? 'That password didn\'t work. Try again:'
+        : 'This statement is password-protected. Enter its password (for ICICI e-statements it\'s explained in the email the statement came with):'));
+    } else {
+      await loadScript('vendor/xlsx.full.min.js');
+      res = SpendlyStatement.readSheet(buf, f.name);
+    }
+    if (!res.found || !res.transactions.length) {
+      alert('Couldn\'t find the list of transactions in this file.\n\nTry downloading the statement again as Excel (XLS) or PDF from ICICI net banking.');
+      return;
+    }
+    openStatementReview(res.transactions, f.name);
+  } catch (err) {
+    const pw = err && /password/i.test(err.name + err.message);
+    if (!pw) alert('Couldn\'t read this file. ' + (err && err.message === 'load' ? 'Check your internet connection and try again.' : 'Try downloading the statement again.'));
+  } finally {
+    btn.textContent = '🏦 Import bank statement';
+  }
+});
+
+function openStatementReview(txs, fileName) {
+  const seen = new Set(state.importedKeys);
+  const inFile = new Set();
+  const catIds = state.categories.map((c) => c.id);
+  let earlier = 0, credits = 0;
+  importItems = [];
+  for (const t of txs) {
+    const key = t.ref ? 'r' + t.ref : SpendlySMS.smsKey(`${t.date}|${t.amount}|${t.type}|${t.remarks}`, '').replace(/^h/, 's');
+    if (inFile.has(key) || seen.has(key)) { earlier++; continue; }
+    inFile.add(key);
+    if (t.type !== 'debit') { credits++; importItems.push({ key, skip: true }); continue; }
+    const byRef = t.ref && state.transactions.some((x) => x.smsRef === t.ref);
+    const sameDay = !byRef && state.transactions.some((x) => x.amount === t.amount && x.date === t.date);
+    const dismissed = !byRef && !sameDay && dismissedSet().has(key);
+    importItems.push({
+      key, amount: t.amount, date: t.date, merchant: t.merchant, ref: t.ref, dup: byRef,
+      detail: t.remarks.length > 70 ? t.remarks.slice(0, 70) + '…' : t.remarks,
+      already: byRef || sameDay || dismissed,
+      alreadyText: byRef ? 'already added' : sameDay ? 'possibly already added' : 'skipped last time',
+      checked: !(byRef || sameDay || dismissed),
+      category: SpendlySMS.guessCategory(t.merchant, t.remarks, catIds, state.merchantMap),
+    });
+  }
+  const debits = importItems.filter((i) => !i.skip);
+  const fresh = debits.filter((i) => !i.already).length;
+  const dates = txs.map((t) => t.date).sort();
+  const parts = [`${txs.length} transactions from ${fmtDay(dates[0])} to ${fmtDay(dates[dates.length - 1])}`,
+    `${fresh} new expense${fresh === 1 ? '' : 's'}`];
+  if (debits.length - fresh) parts.push(`${debits.length - fresh} already in Spendly or skipped before (unticked)`);
+  if (earlier) parts.push(`${earlier} imported before`);
+  if (credits) parts.push(`${credits} money received, skipped`);
+  showReview('Import bank statement', parts.join(' · '));
+}
 
 /* ---------- Backup & restore ---------- */
 async function backup() {
